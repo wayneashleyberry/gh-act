@@ -1,26 +1,89 @@
 package main
 
 import (
-	"fmt"
+	"context"
+	"log"
+	"log/slog"
+	"os"
 
-	"github.com/cli/go-gh/v2/pkg/api"
+	"github.com/urfave/cli/v2"
+	"github.com/wayneashleyberry/gh-act/pkg/cmd"
 )
 
-func main() {
-	fmt.Println("hi world, this is the gh-act extension!")
-	client, err := api.DefaultRESTClient()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	response := struct{ Login string }{}
-	err = client.Get("user", &response)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	fmt.Printf("running as %s\n", response.Login)
+func setDefaultLogger(level slog.Leveler) {
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: level,
+	})
+
+	logger := slog.New(handler)
+
+	slog.SetDefault(logger)
 }
 
-// For more examples of using go-gh, see:
-// https://github.com/cli/go-gh/blob/trunk/example_gh_test.go
+func main() {
+	if err := run(context.Background()); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run(_ context.Context) error {
+	setDefaultLogger(slog.LevelInfo)
+
+	app := &cli.App{
+		Name:  "act",
+		Usage: "The unofficial GitHub Actions package manager",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "debug",
+				Value: false,
+				Usage: "Print debug logs",
+				Action: func(_ *cli.Context, v bool) error {
+					if v {
+						setDefaultLogger(slog.LevelDebug)
+					}
+
+					return nil
+				},
+			},
+		},
+		Commands: []*cli.Command{
+			{
+				Name:  "ls",
+				Usage: "List used actions",
+				Action: func(_ *cli.Context) error {
+					return cmd.ListActions()
+				},
+			},
+			{
+				Name:  "outdated",
+				Usage: "Check for outdated actions",
+				Action: func(ctx *cli.Context) error {
+					return cmd.ListOutdatedActions(ctx.Context)
+				},
+			},
+			{
+				Name:  "update",
+				Usage: "Update actions",
+				Action: func(ctx *cli.Context) error {
+					return cmd.UpdateActions(ctx.Context, ctx.Bool("pin"))
+				},
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:  "pin",
+						Value: false,
+						Usage: "Pin actions after updating them",
+					},
+				},
+			},
+			{
+				Name:  "pin",
+				Usage: "Pin used actions",
+				Action: func(ctx *cli.Context) error {
+					return cmd.PinActions(ctx.Context)
+				},
+			},
+		},
+	}
+
+	return app.Run(os.Args)
+}
