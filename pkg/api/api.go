@@ -56,7 +56,9 @@ func FetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error) {
 		return cachedTags.([]Tag), nil
 	}
 
-	b, _, err := gh.ExecContext(ctx, "api", "/repos/actions/checkout/tags", "--paginate")
+	path := fmt.Sprintf("/repos/%s/%s/tags", owner, repo)
+
+	b, _, err := gh.ExecContext(ctx, "api", path, "--paginate")
 	if err != nil {
 		return []Tag{}, err
 	}

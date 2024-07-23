@@ -21,7 +21,9 @@ func setDefaultLogger(level slog.Leveler) {
 }
 
 func main() {
-	if err := run(context.Background()); err != nil {
+	ctx := context.Background()
+
+	if err := run(ctx); err != nil {
 		log.Fatal(err)
 	}
 }
