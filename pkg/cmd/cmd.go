@@ -12,7 +12,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/google/go-github/v50/github"
-	"github.com/wayneashleyberry/gh-act/pkg/gh"
+	"github.com/wayneashleyberry/gh-act/pkg/api"
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,14 +33,14 @@ var (
 	majorSemverRegex = regexp.MustCompile(`^v?(\d+)(-[0-9A-Za-z-.]+)?(\+[0-9A-Za-z-.]+)?$`)
 )
 
-func init() {
-	c, err := gh.NewClient(context.Background())
-	if err != nil {
-		panic(err)
-	}
+// func init() {
+// 	c, err := gh.NewClient(context.Background())
+// 	if err != nil {
+// 		panic(err)
+// 	}
 
-	client = c
-}
+// 	client = c
+// }
 
 type VersionStyle string
 
@@ -132,9 +132,9 @@ type ParsedAction struct {
 	Node              yaml.Node
 	Owner, Repo       string
 	RawVersionString  string
-	CurrentVersionTag *github.RepositoryTag
-	LatestVersionTag  *github.RepositoryTag
-	PinVersionTag     *github.RepositoryTag
+	CurrentVersionTag *api.Tag
+	LatestVersionTag  *api.Tag
+	PinVersionTag     *api.Tag
 	VersionStyle      VersionStyle
 }
 
@@ -190,9 +190,9 @@ func (p ParsedAction) IsOutdated() (bool, error) {
 
 var ErrCurrentVersionUnmatched = errors.New("could not match version tag to a tag or release on github (might be tagged to a commit)")
 
-func matchVersionToTag(rawVersion string, style VersionStyle, tags []*github.RepositoryTag) (*github.RepositoryTag, error) {
+func matchVersionToTag(rawVersion string, style VersionStyle, tags []api.Tag) (*api.Tag, error) {
 	if style == PinnedVersion {
-		pinnedMatches := []*github.RepositoryTag{}
+		pinnedMatches := []api.Tag{}
 
 		for _, tag := range tags {
 			if rawVersion == tag.Commit.GetSHA() {
@@ -201,7 +201,7 @@ func matchVersionToTag(rawVersion string, style VersionStyle, tags []*github.Rep
 		}
 
 		if len(pinnedMatches) == 1 {
-			return pinnedMatches[0], nil
+			return &pinnedMatches[0], nil
 		}
 
 		// Some projects, like actions/github-script, point multiple tags to
@@ -209,7 +209,7 @@ func matchVersionToTag(rawVersion string, style VersionStyle, tags []*github.Rep
 		// sha. In these kinds of scenarios, the more specific tag is chosen.
 		var specificTagName string
 
-		var specificTag *github.RepositoryTag
+		var specificTag api.Tag
 
 		slog.Debug("matched pinned commit hash to more than one tag")
 
@@ -220,7 +220,7 @@ func matchVersionToTag(rawVersion string, style VersionStyle, tags []*github.Rep
 			}
 		}
 
-		return specificTag, nil
+		return &specificTag, nil
 	}
 
 	currentVersion, err := semver.NewVersion(rawVersion)
@@ -242,7 +242,7 @@ func matchVersionToTag(rawVersion string, style VersionStyle, tags []*github.Rep
 		}
 
 		if currentVersion.Equal(tagVersion) {
-			return tag, nil
+			return &tag, nil
 		}
 	}
 
@@ -275,7 +275,7 @@ func parseAction(ctx context.Context, action Action) (ParsedAction, error) {
 
 	parsed.VersionStyle = style
 
-	tags, err := gh.FetchAllTags(ctx, client, parsed.Owner, parsed.Repo)
+	tags, err := api.FetchAllTags(ctx, parsed.Owner, parsed.Repo)
 	if err != nil {
 		return parsed, fmt.Errorf("fetch all tags: %w", err)
 	}
@@ -299,7 +299,7 @@ func parseAction(ctx context.Context, action Action) (ParsedAction, error) {
 
 	var latestVersion *semver.Version
 
-	var latestTag *github.RepositoryTag
+	var latestTag *api.Tag
 
 	pinVersionTag := parsed.CurrentVersionTag
 
@@ -346,17 +346,17 @@ func parseAction(ctx context.Context, action Action) (ParsedAction, error) {
 
 		if latestVersion == nil {
 			latestVersion = tagVersion
-			latestTag = tag
+			latestTag = &tag
 		}
 
 		if tagVersion.GreaterThan(latestVersion) {
 			latestVersion = tagVersion
-			latestTag = tag
+			latestTag = &tag
 		}
 
 		if tagVersion.GreaterThan(pinVersion) && pinConstraint.Check(tagVersion) {
 			pinVersion = tagVersion
-			pinVersionTag = tag
+			pinVersionTag = &tag
 		}
 	}
 
