@@ -17,5 +17,3 @@ jobs:
         with:
           go_version_file: "go.mod"
           build_script_override: "script/build.sh"
-        env:
-          CGO_ENABLED: 1
