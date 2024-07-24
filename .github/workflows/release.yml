@@ -1,8 +1,10 @@
 name: release
+
 on:
   push:
     tags:
       - "v*"
+
 permissions:
   contents: write
 
@@ -12,3 +14,5 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: cli/gh-extension-precompile@v1
+        with:
+          go_version: "1.22"
