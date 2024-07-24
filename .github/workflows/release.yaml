@@ -15,4 +15,4 @@ jobs:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       - uses: cli/gh-extension-precompile@ee3e4e5b371bbd6dc7f816dc0742e86de6c64085 # v1.6.0
         with:
-          go_version_file: "go.mod"
+          go_version: "1.21"
