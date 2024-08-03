@@ -7,7 +7,7 @@ require (
 	github.com/cli/go-gh/v2 v2.9.0
 	github.com/google/go-github/v50 v50.2.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
-	github.com/urfave/cli/v2 v2.27.2
+	github.com/urfave/cli/v2 v2.27.3
 	gopkg.in/yaml.v3 v3.0.1
 )
 
