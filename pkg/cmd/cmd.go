@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
-	"github.com/google/go-github/v50/github"
 	"github.com/wayneashleyberry/gh-act/pkg/api"
 	"gopkg.in/yaml.v3"
 )
@@ -19,9 +18,6 @@ import (
 var (
 	// Configuration.
 	workflowDirectory = ".github/workflows"
-
-	// GitHub API Client.
-	client *github.Client
 
 	// Patterns
 	sha1Regex = regexp.MustCompile(`^[a-fA-F0-9]{40}$`)
