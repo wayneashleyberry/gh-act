@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -48,7 +49,7 @@ func pinFile(filepath string, updates []ParsedAction) error {
 
 		before, _, found := strings.Cut(line, "uses:")
 		if !found {
-			return fmt.Errorf("line separator not found")
+			return errors.New("line separator not found")
 		}
 
 		if update.VersionStyle == PinnedVersion {

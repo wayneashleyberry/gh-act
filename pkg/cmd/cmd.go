@@ -19,7 +19,7 @@ var (
 	// Configuration.
 	workflowDirectory = ".github/workflows"
 
-	// Patterns
+	// Patterns.
 	sha1Regex = regexp.MustCompile(`^[a-fA-F0-9]{40}$`)
 	// fully qualified semantic version (major.minor.patch).
 	fullSemverRegex = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z-.]+)?(\+[0-9A-Za-z-.]+)?$`)
