@@ -17,7 +17,7 @@ import (
 
 var (
 	// Configuration.
-	workflowDirectory = ".github/workflows"
+	workflowDirectory = ".github"
 
 	// Patterns.
 	sha1Regex = regexp.MustCompile(`^[a-fA-F0-9]{40}$`)
