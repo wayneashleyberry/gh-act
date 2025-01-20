@@ -72,7 +72,7 @@ func parseActionsInFile(ctx context.Context, filepath string) ([]ParsedAction, e
 	return parsedActions, nil
 }
 
-// Helper function to parse "steps" from a given node
+// Helper function to parse "steps" from a given node.
 func parseSteps(ctx context.Context, filepath string, parentNode *yaml.Node, key string) []ParsedAction {
 	parsedActions := []ParsedAction{}
 
@@ -89,11 +89,13 @@ func parseSteps(ctx context.Context, filepath string, parentNode *yaml.Node, key
 
 							if strings.HasPrefix(usesNode.Value, ".") {
 								slog.Debug("ignoring local action", slog.String("value", usesNode.Value))
+
 								continue
 							}
 
 							if strings.Count(usesNode.Value, "/") > 1 {
 								slog.Debug("ignoring nested action", slog.String("value", usesNode.Value))
+
 								continue
 							}
 
@@ -103,6 +105,7 @@ func parseSteps(ctx context.Context, filepath string, parentNode *yaml.Node, key
 							})
 							if err != nil {
 								slog.Debug("problem parsing action", slog.String("error.message", err.Error()))
+
 								continue
 							}
 
