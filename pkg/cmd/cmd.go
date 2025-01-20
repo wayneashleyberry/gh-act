@@ -29,15 +29,6 @@ var (
 	majorSemverRegex = regexp.MustCompile(`^v?(\d+)(-[0-9A-Za-z-.]+)?(\+[0-9A-Za-z-.]+)?$`)
 )
 
-// func init() {
-// 	c, err := gh.NewClient(context.Background())
-// 	if err != nil {
-// 		panic(err)
-// 	}
-
-// 	client = c
-// }
-
 type VersionStyle string
 
 var (
