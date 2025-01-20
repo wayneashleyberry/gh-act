@@ -4,7 +4,7 @@ go 1.22.5
 
 require (
 	github.com/Masterminds/semver/v3 v3.2.1
-	github.com/cli/go-gh/v2 v2.9.0
+	github.com/cli/go-gh/v2 v2.11.1
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/urfave/cli/v2 v2.27.3
 	gopkg.in/yaml.v3 v3.0.1
