@@ -52,53 +52,61 @@ func parseActionsInFile(ctx context.Context, filepath string) ([]ParsedAction, e
 		return []ParsedAction{}, fmt.Errorf("unable to unmarshal YAML: %w", err)
 	}
 
-	// Iterate over jobs.*.steps and update the "uses" key
-	jobsNode, ok := content["jobs"]
-	if !ok {
-		return []ParsedAction{}, nil // No jobs section found
-	}
-
 	parsedActions := []ParsedAction{}
 
-	for i := 0; i < len(jobsNode.Content); i += 2 {
-		jobContentNode := jobsNode.Content[i+1]
+	// Parse jobs.*.steps
+	jobsNode, ok := content["jobs"]
+	if ok {
+		for i := 0; i < len(jobsNode.Content); i += 2 {
+			jobContentNode := jobsNode.Content[i+1]
+			parsedActions = append(parsedActions, parseSteps(ctx, filepath, jobContentNode, "steps")...)
+		}
+	}
 
-		// Find the steps node in the job
-		for j := 0; j < len(jobContentNode.Content); j += 2 {
-			keyNode := jobContentNode.Content[j]
-			if keyNode.Value == "steps" {
-				stepsNode := jobContentNode.Content[j+1]
-				for _, stepNode := range stepsNode.Content {
-					if stepNode.Kind == yaml.MappingNode {
-						for k := 0; k < len(stepNode.Content); k += 2 {
-							stepKeyNode := stepNode.Content[k]
-							if stepKeyNode.Value == "uses" {
-								usesNode := stepNode.Content[k+1]
+	// Parse runs.steps
+	runsNode, ok := content["runs"]
+	if ok {
+		parsedActions = append(parsedActions, parseSteps(ctx, filepath, &runsNode, "steps")...)
+	}
 
-								if strings.HasPrefix(usesNode.Value, ".") {
-									slog.Debug("ignoring local action", slog.String("value", usesNode.Value))
+	return parsedActions, nil
+}
 
-									continue
-								}
+// Helper function to parse "steps" from a given node
+func parseSteps(ctx context.Context, filepath string, parentNode *yaml.Node, key string) []ParsedAction {
+	parsedActions := []ParsedAction{}
 
-								if strings.Count(usesNode.Value, "/") > 1 {
-									slog.Debug("ignoring nested action", slog.String("value", usesNode.Value))
+	for j := 0; j < len(parentNode.Content); j += 2 {
+		keyNode := parentNode.Content[j]
+		if keyNode.Value == key {
+			stepsNode := parentNode.Content[j+1]
+			for _, stepNode := range stepsNode.Content {
+				if stepNode.Kind == yaml.MappingNode {
+					for k := 0; k < len(stepNode.Content); k += 2 {
+						stepKeyNode := stepNode.Content[k]
+						if stepKeyNode.Value == "uses" {
+							usesNode := stepNode.Content[k+1]
 
-									continue
-								}
-
-								parsed, err := parseAction(ctx, Action{
-									FilePath: filepath,
-									Node:     *usesNode,
-								})
-								if err != nil {
-									slog.Debug("problem parsing action", slog.String("error.message", err.Error()))
-
-									continue
-								}
-
-								parsedActions = append(parsedActions, parsed)
+							if strings.HasPrefix(usesNode.Value, ".") {
+								slog.Debug("ignoring local action", slog.String("value", usesNode.Value))
+								continue
 							}
+
+							if strings.Count(usesNode.Value, "/") > 1 {
+								slog.Debug("ignoring nested action", slog.String("value", usesNode.Value))
+								continue
+							}
+
+							parsed, err := parseAction(ctx, Action{
+								FilePath: filepath,
+								Node:     *usesNode,
+							})
+							if err != nil {
+								slog.Debug("problem parsing action", slog.String("error.message", err.Error()))
+								continue
+							}
+
+							parsedActions = append(parsedActions, parsed)
 						}
 					}
 				}
@@ -106,7 +114,7 @@ func parseActionsInFile(ctx context.Context, filepath string) ([]ParsedAction, e
 		}
 	}
 
-	return parsedActions, nil
+	return parsedActions
 }
 
 type Action struct {
