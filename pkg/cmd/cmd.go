@@ -209,7 +209,7 @@ func matchVersionToTag(rawVersion string, style VersionStyle, tags []api.Tag) (*
 
 		var specificTag api.Tag
 
-		slog.Debug("matched pinned commit hash to more than one tag")
+		slog.Debug("matched pinned commit hash to more than one tag", slog.String("version", rawVersion))
 
 		for _, tag := range pinnedMatches {
 			if len(tag.GetName()) > len(specificTagName) {
@@ -286,6 +286,10 @@ func parseAction(ctx context.Context, action Action) (ParsedAction, error) {
 	matchedTag, err := matchVersionToTag(parsed.RawVersionString, parsed.VersionStyle, tags)
 	if err != nil {
 		return parsed, err
+	}
+
+	if matchedTag == nil {
+		slog.Debug("match version to tag didn't return an error or a tag", slog.String("action", action.Node.Value))
 	}
 
 	parsed.CurrentVersionTag = matchedTag
