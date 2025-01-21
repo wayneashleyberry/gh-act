@@ -289,7 +289,7 @@ func parseAction(ctx context.Context, action Action) (ParsedAction, error) {
 
 	matchedTag, err := matchVersionToTag(parsed.RawVersionString, parsed.VersionStyle, tags)
 	if err != nil {
-		return parsed, err
+		return parsed, fmt.Errorf("problem matching version to a tag: %w", err)
 	}
 
 	if matchedTag == nil {
