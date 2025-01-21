@@ -198,6 +198,10 @@ func matchVersionToTag(rawVersion string, style VersionStyle, tags []api.Tag) (*
 			}
 		}
 
+		if len(pinnedMatches) == 0 {
+			return nil, errors.New("pinned to a commit hash with no associated tag")
+		}
+
 		if len(pinnedMatches) == 1 {
 			return &pinnedMatches[0], nil
 		}
