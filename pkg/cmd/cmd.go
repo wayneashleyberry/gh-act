@@ -296,6 +296,13 @@ func parseAction(ctx context.Context, action Action) (ParsedAction, error) {
 
 	currentVersion, err := semver.NewVersion(matchedTag.GetName())
 	if err != nil {
+		slog.Debug(
+			"details on problematic matched tag",
+			slog.String("name", matchedTag.Name),
+			slog.String("commit.sha", matchedTag.Commit.Sha),
+			slog.String("commit.url", matchedTag.Commit.URL),
+		)
+
 		return parsed, fmt.Errorf("parse semantic version: %s: %w", matchedTag.GetName(), err)
 	}
 
