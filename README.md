@@ -50,7 +50,7 @@ gh act help
 
 ```
 NAME:
-   act - The unofficial GitHub Actions package manager
+   act - Update, manage and pin your GitHub Actions
 
 USAGE:
    act [global options] command [command options]

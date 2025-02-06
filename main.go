@@ -33,7 +33,7 @@ func run(_ context.Context) error {
 
 	app := &cli.App{
 		Name:  "act",
-		Usage: "The unofficial GitHub Actions package manager",
+		Usage: "Update, manage and pin your GitHub Actions",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "debug",
