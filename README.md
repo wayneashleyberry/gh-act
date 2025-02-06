@@ -1,10 +1,6 @@
-<center>
-<h1>gh-act</h1>
+## gh-act
 
 > ✨ A GitHub (gh) CLI extension to manage, update and pin your GitHub Actions.
-
-<img width="1265" alt="Image" src="https://github.com/user-attachments/assets/9efbd0d5-f83e-4d65-98f0-abab889a39dd" />
-</center>
 
 ### Why?
 
