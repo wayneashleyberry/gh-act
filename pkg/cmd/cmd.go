@@ -354,6 +354,9 @@ func parseAction(ctx context.Context, action Action) (ParsedAction, error) {
 				slog.String("error.message", err.Error()),
 			)
 
+			continue
+		}
+
 		// Exclude pre-release versions (alpha, beta, rc, etc.)
 		if tagVersion.Prerelease() != "" {
 			continue
