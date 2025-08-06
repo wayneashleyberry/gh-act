@@ -2,6 +2,12 @@
 
 > ✨ A GitHub (gh) CLI extension to manage, update and pin your GitHub Actions.
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/wayneashleyberry/gh-act.svg)](https://pkg.go.dev/github.com/wayneashleyberry/gh-act)
+[![Go Report Card](https://goreportcard.com/badge/github.com/wayneashleyberry/gh-act)](https://goreportcard.com/report/github.com/wayneashleyberry/gh-act)
+[![Lint](https://github.com/wayneashleyberry/gh-act/actions/workflows/lint.yaml/badge.svg)](https://github.com/wayneashleyberry/gh-act/actions/workflows/lint.yaml)
+[![Dependabot Updates](https://github.com/wayneashleyberry/gh-act/actions/workflows/dependabot/dependabot-updates/badge.svg)](https://github.com/wayneashleyberry/gh-act/actions/workflows/dependabot/dependabot-updates)
+[![Release](https://github.com/wayneashleyberry/gh-act/actions/workflows/release.yaml/badge.svg)](https://github.com/wayneashleyberry/gh-act/actions/workflows/release.yaml)
+
 ### Why?
 
 > _“Pinning an action to a full length commit SHA is currently the only way to use an action as an immutable release. Pinning to a particular SHA helps mitigate the risk of a bad actor adding a backdoor to the action's repository, as they would need to generate a SHA-1 collision for a valid Git object payload. When selecting a SHA, you should verify it is from the action's repository and not a repository fork.” — [Security hardening for GitHub Actions](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions)_
