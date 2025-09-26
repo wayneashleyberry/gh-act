@@ -38,16 +38,10 @@ var (
 	SemanticVersionMajorComponentOnly = VersionStyle("semver-major")
 )
 
-func parseActionsInFile(ctx context.Context, filepath string) ([]ParsedAction, error) {
-	// Read the YAML file
-	data, err := os.ReadFile(filepath)
-	if err != nil {
-		return []ParsedAction{}, fmt.Errorf("unable to read file: %w", err)
-	}
-
+func parseActionsInString(ctx context.Context, yamlContent string, filepath string, apiClient api.GitHubAPI) ([]ParsedAction, error) {
 	var content map[string]yaml.Node
 
-	err = yaml.Unmarshal(data, &content)
+	err := yaml.Unmarshal([]byte(yamlContent), &content)
 	if err != nil {
 		return []ParsedAction{}, fmt.Errorf("unable to unmarshal YAML: %w", err)
 	}
@@ -59,21 +53,33 @@ func parseActionsInFile(ctx context.Context, filepath string) ([]ParsedAction, e
 	if ok {
 		for i := 0; i < len(jobsNode.Content); i += 2 {
 			jobContentNode := jobsNode.Content[i+1]
-			parsedActions = append(parsedActions, parseSteps(ctx, filepath, jobContentNode, "steps")...)
+			parsedActions = append(parsedActions, parseSteps(ctx, filepath, jobContentNode, "steps", apiClient)...)
 		}
 	}
 
 	// Parse runs.steps
 	runsNode, ok := content["runs"]
 	if ok {
-		parsedActions = append(parsedActions, parseSteps(ctx, filepath, &runsNode, "steps")...)
+		parsedActions = append(parsedActions, parseSteps(ctx, filepath, &runsNode, "steps", apiClient)...)
 	}
 
 	return parsedActions, nil
 }
 
+func parseActionsInFile(ctx context.Context, filepath string) ([]ParsedAction, error) {
+	// Read the YAML file
+	data, err := os.ReadFile(filepath)
+	if err != nil {
+		return []ParsedAction{}, fmt.Errorf("unable to read file: %w", err)
+	}
+
+	apiClient := api.NewRealGitHubAPI()
+
+	return parseActionsInString(ctx, string(data), filepath, apiClient)
+}
+
 // Helper function to parse "steps" from a given node.
-func parseSteps(ctx context.Context, filepath string, parentNode *yaml.Node, key string) []ParsedAction {
+func parseSteps(ctx context.Context, filepath string, parentNode *yaml.Node, key string, apiClient api.GitHubAPI) []ParsedAction {
 	parsedActions := []ParsedAction{}
 
 	for j := 0; j < len(parentNode.Content); j += 2 {
@@ -93,16 +99,10 @@ func parseSteps(ctx context.Context, filepath string, parentNode *yaml.Node, key
 								continue
 							}
 
-							if strings.Count(usesNode.Value, "/") > 1 {
-								slog.Debug("ignoring nested action", slog.String("value", usesNode.Value))
-
-								continue
-							}
-
 							parsed, err := parseAction(ctx, Action{
 								FilePath: filepath,
 								Node:     *usesNode,
-							})
+							}, apiClient)
 							if err != nil {
 								slog.Debug("problem parsing action", slog.String("error.message", err.Error()))
 
@@ -129,6 +129,7 @@ type ParsedAction struct {
 	FilePath          string
 	Node              yaml.Node
 	Owner, Repo       string
+	Subpath           string
 	RawVersionString  string
 	CurrentVersionTag *api.Tag
 	LatestVersionTag  *api.Tag
@@ -154,6 +155,15 @@ func (p ParsedAction) NewVersionString() (string, error) {
 	}
 
 	return newVersionString, nil
+}
+
+// ActionReference returns the formatted action reference (owner/repo/subpath).
+func (p ParsedAction) ActionReference() string {
+	if p.Subpath != "" {
+		return fmt.Sprintf("%s/%s/%s", p.Owner, p.Repo, p.Subpath)
+	}
+
+	return fmt.Sprintf("%s/%s", p.Owner, p.Repo)
 }
 
 func (p ParsedAction) IsOutdated() (bool, error) {
@@ -251,14 +261,14 @@ func matchVersionToTag(rawVersion string, style VersionStyle, tags []api.Tag) (*
 	return nil, errors.New("no match")
 }
 
-func parseAction(ctx context.Context, action Action) (ParsedAction, error) {
+func parseAction(ctx context.Context, action Action, apiClient api.GitHubAPI) (ParsedAction, error) {
 	parts := strings.Split(action.Node.Value, "@")
 	if len(parts) != 2 {
 		return ParsedAction{}, fmt.Errorf("too few parts: %s", action.Node.Value)
 	}
 
 	subParts := strings.Split(parts[0], "/")
-	if len(subParts) > 2 {
+	if len(subParts) < 2 {
 		return ParsedAction{}, fmt.Errorf("too few parts: %s", action.Node.Value)
 	}
 
@@ -270,6 +280,11 @@ func parseAction(ctx context.Context, action Action) (ParsedAction, error) {
 		Repo:             subParts[1],
 	}
 
+	// Handle subpath if present (e.g., gdcorp-actions/apps-change-orders/create@v2)
+	if len(subParts) > 2 {
+		parsed.Subpath = strings.Join(subParts[2:], "/")
+	}
+
 	style, err := detectVersionStyle(parsed.RawVersionString)
 	if err != nil {
 		return ParsedAction{}, fmt.Errorf("could not determine version style: %w", err)
@@ -277,7 +292,7 @@ func parseAction(ctx context.Context, action Action) (ParsedAction, error) {
 
 	parsed.VersionStyle = style
 
-	tags, err := api.FetchAllTags(ctx, parsed.Owner, parsed.Repo)
+	tags, err := apiClient.FetchAllTags(ctx, parsed.Owner, parsed.Repo)
 	if err != nil {
 		return parsed, fmt.Errorf("fetch all tags: %w", err)
 	}

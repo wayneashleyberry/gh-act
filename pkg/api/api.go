@@ -17,6 +17,19 @@ func init() {
 	c = cache.New(5*time.Minute, 10*time.Minute)
 }
 
+// GitHubAPI defines the interface for GitHub API operations.
+type GitHubAPI interface {
+	FetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error)
+}
+
+// RealGitHubAPI implements GitHubAPI using the actual GitHub API.
+type RealGitHubAPI struct{}
+
+// NewRealGitHubAPI creates a new instance of RealGitHubAPI.
+func NewRealGitHubAPI() *RealGitHubAPI {
+	return &RealGitHubAPI{}
+}
+
 type Commit struct {
 	Sha string `json:"sha"`
 	URL string `json:"url"`
@@ -44,6 +57,10 @@ func (c *Commit) GetSHA() string {
 	}
 
 	return ""
+}
+
+func (r *RealGitHubAPI) FetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error) {
+	return FetchAllTags(ctx, owner, repo)
 }
 
 func FetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error) {
