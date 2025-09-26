@@ -39,15 +39,18 @@ var (
 )
 
 func parseActionsInFile(ctx context.Context, filepath string) ([]ParsedAction, error) {
-	// Read the YAML file
 	data, err := os.ReadFile(filepath)
 	if err != nil {
 		return []ParsedAction{}, fmt.Errorf("unable to read file: %w", err)
 	}
+	return parseActionsInString(ctx, string(data), filepath)
+}
 
+// parseActionsInString parses actions from a YAML string, optionally providing a filepath for context (can be empty for tests).
+func parseActionsInString(ctx context.Context, yamlContent string, filepath string) ([]ParsedAction, error) {
 	var content map[string]yaml.Node
 
-	err = yaml.Unmarshal(data, &content)
+	err := yaml.Unmarshal([]byte(yamlContent), &content)
 	if err != nil {
 		return []ParsedAction{}, fmt.Errorf("unable to unmarshal YAML: %w", err)
 	}

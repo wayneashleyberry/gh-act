@@ -46,7 +46,7 @@ func (c *Commit) GetSHA() string {
 	return ""
 }
 
-func FetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error) {
+var FetchAllTags = func(ctx context.Context, owner, repo string) ([]Tag, error) {
 	cacheKey := fmt.Sprintf("github.tags.all.%s.%s", owner, repo)
 
 	cachedTags, found := c.Get(cacheKey)
