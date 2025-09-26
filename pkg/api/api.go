@@ -17,9 +17,18 @@ func init() {
 	c = cache.New(5*time.Minute, 10*time.Minute)
 }
 
+// Repository represents basic repository information from GitHub API.
+type Repository struct {
+	Name          string `json:"name"`
+	FullName      string `json:"full_name"`
+	DefaultBranch string `json:"default_branch"`
+	Private       bool   `json:"private"`
+}
+
 // GitHubAPI defines the interface for GitHub API operations.
 type GitHubAPI interface {
 	FetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error)
+	FetchRepository(ctx context.Context, owner, repo string) (*Repository, error)
 }
 
 // RealGitHubAPI implements GitHubAPI using the actual GitHub API.
@@ -63,6 +72,10 @@ func (r *RealGitHubAPI) FetchAllTags(ctx context.Context, owner, repo string) ([
 	return FetchAllTags(ctx, owner, repo)
 }
 
+func (r *RealGitHubAPI) FetchRepository(ctx context.Context, owner, repo string) (*Repository, error) {
+	return FetchRepository(ctx, owner, repo)
+}
+
 func FetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error) {
 	cacheKey := fmt.Sprintf("github.tags.all.%s.%s", owner, repo)
 
@@ -90,4 +103,33 @@ func FetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error) {
 	c.Set(cacheKey, tags, cache.DefaultExpiration)
 
 	return tags, nil
+}
+
+func FetchRepository(ctx context.Context, owner, repo string) (*Repository, error) {
+	cacheKey := fmt.Sprintf("github.repository.%s.%s", owner, repo)
+
+	cachedRepo, found := c.Get(cacheKey)
+	if found {
+		slog.Debug(fmt.Sprintf("using cache for repository %s/%s", owner, repo))
+
+		return cachedRepo.(*Repository), nil
+	}
+
+	path := fmt.Sprintf("/repos/%s/%s", owner, repo)
+
+	b, _, err := gh.ExecContext(ctx, "api", path)
+	if err != nil {
+		return nil, fmt.Errorf("fetch repository info: %w", err)
+	}
+
+	var repository Repository
+
+	err = json.Unmarshal(b.Bytes(), &repository)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal repository info: %w", err)
+	}
+
+	c.Set(cacheKey, &repository, cache.DefaultExpiration)
+
+	return &repository, nil
 }

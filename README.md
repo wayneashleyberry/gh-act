@@ -14,6 +14,24 @@
 
 You should keep your GitHub Actions up to date, and pinned, but this makes them difficult to maintain unless you rely on [Dependabot](https://github.com/dependabot). This is where `act` comes in, it is a simple extension for the GitHub CLI which helps you keep third-party dependencies up to date.
 
+### Branch Reference Support
+
+`gh-act` now supports branch references (like `@main`, `@master`, etc.) when using the `--pin` flag. This is particularly useful for actions that don't follow semantic versioning or when you want to pin the latest stable version from the default branch.
+
+**Features:**
+
+- Automatically detects branch references in your workflow files
+- Validates that the branch is the repository's default branch (for security)
+- Resolves the branch to the latest tagged version when pinning
+- Works with all standard commands (`update --pin`, `outdated`, `pin`)
+
+**Example:**
+
+```diff
+- uses: actions/checkout@main
++ uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+```
+
 ### Installation
 
 Installation is a single command if you already have the [GitHub CLI](https://cli.github.com) installed:
@@ -45,6 +63,18 @@ gh act pin
 #### Update actions
 
 ```sh
+gh act update --pin
+```
+
+#### Update actions with branch references
+
+When you have actions using branch references (like `@main`), use the `--pin` flag to convert them to pinned versions:
+
+```sh
+# This will convert actions like:
+# - uses: actions/checkout@main
+# To pinned versions like:
+# - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 gh act update --pin
 ```
 

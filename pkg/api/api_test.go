@@ -10,14 +10,16 @@ import (
 
 // MockGitHubAPI implements the GitHubAPI interface for testing.
 type MockGitHubAPI struct {
-	tags map[string][]Tag // keyed by "owner/repo"
-	err  error
+	tags         map[string][]Tag       // keyed by "owner/repo"
+	repositories map[string]*Repository // keyed by "owner/repo"
+	err          error
 }
 
 // NewMockGitHubAPI creates a new mock API client.
 func NewMockGitHubAPI() *MockGitHubAPI {
 	return &MockGitHubAPI{
-		tags: make(map[string][]Tag),
+		tags:         make(map[string][]Tag),
+		repositories: make(map[string]*Repository),
 	}
 }
 
@@ -27,7 +29,13 @@ func (m *MockGitHubAPI) SetTags(owner, repo string, tags []Tag) {
 	m.tags[key] = tags
 }
 
-// SetError sets an error to be returned by FetchAllTags.
+// SetRepository sets the mock repository info for a specific repository.
+func (m *MockGitHubAPI) SetRepository(owner, repo string, repository *Repository) {
+	key := owner + "/" + repo
+	m.repositories[key] = repository
+}
+
+// SetError sets an error to be returned by FetchAllTags and FetchRepository.
 func (m *MockGitHubAPI) SetError(err error) {
 	m.err = err
 }
@@ -43,6 +51,25 @@ func (m *MockGitHubAPI) FetchAllTags(_ context.Context, owner, repo string) ([]T
 	}
 
 	return []Tag{}, nil
+}
+
+func (m *MockGitHubAPI) FetchRepository(_ context.Context, owner, repo string) (*Repository, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+
+	key := owner + "/" + repo
+	if repository, exists := m.repositories[key]; exists {
+		return repository, nil
+	}
+
+	// Return a default repository with main as default branch if not explicitly set
+	return &Repository{
+		Name:          repo,
+		FullName:      owner + "/" + repo,
+		DefaultBranch: "main",
+		Private:       false,
+	}, nil
 }
 
 func TestMockGitHubAPI(t *testing.T) {
@@ -80,4 +107,41 @@ func TestRealGitHubAPI(_ *testing.T) {
 	api := NewRealGitHubAPI()
 
 	var _ GitHubAPI = api // compile-time interface check
+}
+
+func TestRepositoryMockFunctionality(t *testing.T) {
+	ctx := context.Background()
+
+	mock := NewMockGitHubAPI()
+
+	// Test default repository response
+	repo, err := mock.FetchRepository(ctx, "owner", "repo")
+	require.NoError(t, err)
+	require.Equal(t, "repo", repo.Name)
+	require.Equal(t, "owner/repo", repo.FullName)
+	require.Equal(t, "main", repo.DefaultBranch)
+	require.False(t, repo.Private)
+
+	// Test with custom repository
+	customRepo := &Repository{
+		Name:          "custom",
+		FullName:      "owner/custom",
+		DefaultBranch: "develop",
+		Private:       true,
+	}
+	mock.SetRepository("owner", "custom", customRepo)
+
+	repo, err = mock.FetchRepository(ctx, "owner", "custom")
+	require.NoError(t, err)
+	require.Equal(t, "custom", repo.Name)
+	require.Equal(t, "owner/custom", repo.FullName)
+	require.Equal(t, "develop", repo.DefaultBranch)
+	require.True(t, repo.Private)
+
+	// Test error case
+	expectedError := errors.New("Repository API error")
+	mock.SetError(expectedError)
+
+	_, err = mock.FetchRepository(ctx, "owner", "repo")
+	require.ErrorIs(t, err, expectedError)
 }

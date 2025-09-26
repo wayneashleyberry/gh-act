@@ -65,7 +65,7 @@ func run(_ context.Context) error {
 			},
 			{
 				Name:  "update",
-				Usage: "Update actions",
+				Usage: "Update actions (supports branch references like @main when using --pin)",
 				Action: func(ctx *cli.Context) error {
 					return cmd.UpdateActions(ctx.Context, ctx.Bool("pin"))
 				},
@@ -73,7 +73,7 @@ func run(_ context.Context) error {
 					&cli.BoolFlag{
 						Name:  "pin",
 						Value: false,
-						Usage: "Pin actions after updating them",
+						Usage: "Pin actions after updating them (required for branch references like @main)",
 					},
 				},
 			},
