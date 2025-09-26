@@ -69,7 +69,8 @@ func updateFile(filepath string, updates []ParsedAction) error {
 				return fmt.Errorf("new version from latest version tag: %w", err)
 			}
 
-			line = before + fmt.Sprintf("uses: %s@%s", update.ActionReference(), newVersionString)
+			// Always add a comment with the new version tag name when updating
+			line = before + fmt.Sprintf("uses: %s@%s # %s", update.ActionReference(), newVersionString, update.LatestVersionTag.GetName())
 		}
 
 		lines[i] = line

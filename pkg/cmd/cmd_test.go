@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -543,4 +544,129 @@ func TestBranchReferenceEdgeCases(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUpdateFileCommentHandling(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a temporary test file with one action that has a comment and one without
+	testContent := `name: Test Workflow
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2 # v2.0.0
+      - uses: actions/setup-node@v3
+      - run: echo "test"
+`
+
+	// Create temporary file
+	tmpFile, err := os.CreateTemp("", "test-workflow-*.yml")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	_, err = tmpFile.WriteString(testContent)
+	require.NoError(t, err)
+	tmpFile.Close()
+
+	// Mock tags for testing - simulate updating from v2 to v4 for checkout
+	checkoutTags := []api.Tag{
+		{
+			Name: "v2.0.0",
+			Commit: api.Commit{
+				Sha: "abc123def456abc123def456abc123def456ab12",
+				URL: "https://api.github.com/repos/actions/checkout/git/commits/abc123",
+			},
+		},
+		{
+			Name: "v4.0.0",
+			Commit: api.Commit{
+				Sha: "def456ghi789def456ghi789def456ghi789de45",
+				URL: "https://api.github.com/repos/actions/checkout/git/commits/def456",
+			},
+		},
+	}
+
+	// Test checkout action (has existing comment)
+	mockAPI := NewMockGitHubAPI(checkoutTags, nil)
+	updates, err := parseActionsInString(ctx, testContent, tmpFile.Name(), mockAPI)
+	require.NoError(t, err)
+
+	// Filter to just checkout action
+	var checkoutUpdate ParsedAction
+	for _, update := range updates {
+		if update.Repo == "checkout" {
+			checkoutUpdate = update
+			break
+		}
+	}
+	require.NotEmpty(t, checkoutUpdate.Node.Value)
+
+	// Update the file
+	err = updateFile(tmpFile.Name(), []ParsedAction{checkoutUpdate})
+	require.NoError(t, err)
+
+	// Read the updated content
+	updatedContent, err := os.ReadFile(tmpFile.Name())
+	require.NoError(t, err)
+	updatedStr := string(updatedContent)
+
+	// Verify that the comment was updated to reflect the new version
+	require.Contains(t, updatedStr, "uses: actions/checkout@v4 # v4.0.0")
+	require.NotContains(t, updatedStr, "# v2.0.0") // old comment should be gone
+
+	// Test that actions without comments also get comments added
+	setupNodeTags := []api.Tag{
+		{
+			Name: "v3.0.0",
+			Commit: api.Commit{
+				Sha: "ghi789jkl012ghi789jkl012ghi789jkl012gh78",
+				URL: "https://api.github.com/repos/actions/setup-node/git/commits/ghi789",
+			},
+		},
+		{
+			Name: "v4.1.0",
+			Commit: api.Commit{
+				Sha: "jkl012mno345jkl012mno345jkl012mno345jk01",
+				URL: "https://api.github.com/repos/actions/setup-node/git/commits/jkl012",
+			},
+		},
+	}
+
+	// Create a new test file for setup-node
+	testContent2 := `name: Test Workflow
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v3
+      - run: echo "test"
+`
+
+	tmpFile2, err := os.CreateTemp("", "test-workflow2-*.yml")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile2.Name())
+
+	_, err = tmpFile2.WriteString(testContent2)
+	require.NoError(t, err)
+	tmpFile2.Close()
+
+	mockAPI2 := NewMockGitHubAPI(setupNodeTags, nil)
+	updates2, err := parseActionsInString(ctx, testContent2, tmpFile2.Name(), mockAPI2)
+	require.NoError(t, err)
+	require.Len(t, updates2, 1)
+
+	// Update the file
+	err = updateFile(tmpFile2.Name(), updates2)
+	require.NoError(t, err)
+
+	// Read the updated content
+	updatedContent2, err := os.ReadFile(tmpFile2.Name())
+	require.NoError(t, err)
+	updatedStr2 := string(updatedContent2)
+
+	// Verify that a comment was added even though there wasn't one before
+	require.Contains(t, updatedStr2, "uses: actions/setup-node@v4 # v4.1.0")
 }
