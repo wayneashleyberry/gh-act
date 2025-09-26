@@ -53,7 +53,6 @@ linters:
     - nolintlint
     - nonamedreturns
     - nosprintfhostport
-    - paralleltest
     - perfsprint
     - prealloc
     - predeclared
@@ -69,9 +68,7 @@ linters:
     - tagalign
     - testableexamples
     - testifylint
-    - testpackage
     - thelper
-    - tparallel
     - unconvert
     - unparam
     - usestdlibvars
