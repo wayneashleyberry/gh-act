@@ -99,12 +99,6 @@ func parseSteps(ctx context.Context, filepath string, parentNode *yaml.Node, key
 								continue
 							}
 
-							if strings.Count(usesNode.Value, "/") > 1 {
-								slog.Debug("ignoring nested action", slog.String("value", usesNode.Value))
-
-								continue
-							}
-
 							parsed, err := parseAction(ctx, Action{
 								FilePath: filepath,
 								Node:     *usesNode,
@@ -135,6 +129,7 @@ type ParsedAction struct {
 	FilePath          string
 	Node              yaml.Node
 	Owner, Repo       string
+	Subpath           string
 	RawVersionString  string
 	CurrentVersionTag *api.Tag
 	LatestVersionTag  *api.Tag
@@ -160,6 +155,15 @@ func (p ParsedAction) NewVersionString() (string, error) {
 	}
 
 	return newVersionString, nil
+}
+
+// ActionReference returns the formatted action reference (owner/repo/subpath).
+func (p ParsedAction) ActionReference() string {
+	if p.Subpath != "" {
+		return fmt.Sprintf("%s/%s/%s", p.Owner, p.Repo, p.Subpath)
+	}
+
+	return fmt.Sprintf("%s/%s", p.Owner, p.Repo)
 }
 
 func (p ParsedAction) IsOutdated() (bool, error) {
@@ -264,7 +268,7 @@ func parseAction(ctx context.Context, action Action, apiClient api.GitHubAPI) (P
 	}
 
 	subParts := strings.Split(parts[0], "/")
-	if len(subParts) > 2 {
+	if len(subParts) < 2 {
 		return ParsedAction{}, fmt.Errorf("too few parts: %s", action.Node.Value)
 	}
 
@@ -274,6 +278,11 @@ func parseAction(ctx context.Context, action Action, apiClient api.GitHubAPI) (P
 		RawVersionString: parts[1],
 		Owner:            subParts[0],
 		Repo:             subParts[1],
+	}
+
+	// Handle subpath if present (e.g., gdcorp-actions/apps-change-orders/create@v2)
+	if len(subParts) > 2 {
+		parsed.Subpath = strings.Join(subParts[2:], "/")
 	}
 
 	style, err := detectVersionStyle(parsed.RawVersionString)

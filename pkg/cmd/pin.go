@@ -53,9 +53,9 @@ func pinFile(filepath string, updates []ParsedAction) error {
 		}
 
 		if update.VersionStyle == PinnedVersion {
-			line = before + fmt.Sprintf("uses: %s/%s@%s # %s", update.Owner, update.Repo, update.CurrentVersionTag.Commit.GetSHA(), update.CurrentVersionTag.GetName())
+			line = before + fmt.Sprintf("uses: %s@%s # %s", update.ActionReference(), update.CurrentVersionTag.Commit.GetSHA(), update.CurrentVersionTag.GetName())
 		} else {
-			line = before + fmt.Sprintf("uses: %s/%s@%s # %s", update.Owner, update.Repo, update.PinVersionTag.Commit.GetSHA(), update.PinVersionTag.GetName())
+			line = before + fmt.Sprintf("uses: %s@%s # %s", update.ActionReference(), update.PinVersionTag.Commit.GetSHA(), update.PinVersionTag.GetName())
 		}
 
 		lines[i] = line

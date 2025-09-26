@@ -32,16 +32,15 @@ func ListOutdatedActions(ctx context.Context) error {
 
 			location := fmt.Sprintf("%s:%d:%d", action.FilePath, action.Node.Line, action.Node.Column)
 
-			current := fmt.Sprintf("%s/%s@%s", action.Owner, action.Repo, action.RawVersionString)
+			current := fmt.Sprintf("%s@%s", action.ActionReference(), action.RawVersionString)
 
 			if action.VersionStyle == PinnedVersion {
 				fmt.Printf(
-					"%s: %s (%s) → %s/%s@%s (%s)\n",
+					"%s: %s (%s) → %s@%s (%s)\n",
 					location,
 					current,
 					action.CurrentVersionTag.GetName(),
-					action.Owner,
-					action.Repo,
+					action.ActionReference(),
 					action.LatestVersionTag.Commit.GetSHA(),
 					action.LatestVersionTag.GetName(),
 				)
@@ -54,11 +53,10 @@ func ListOutdatedActions(ctx context.Context) error {
 				}
 
 				fmt.Printf(
-					"%s: %s → %s/%s@%s\n",
+					"%s: %s → %s@%s\n",
 					location,
 					current,
-					action.Owner,
-					action.Repo,
+					action.ActionReference(),
 					newVersionString,
 				)
 			}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/wayneashleyberry/gh-act/pkg/api"
+	"gopkg.in/yaml.v3"
 )
 
 // MockGitHubAPI implements the GitHubAPI interface for testing.
@@ -116,6 +117,21 @@ jobs:
 `,
 			expectedLen: 1,
 		},
+		{
+			name: "workflow with subpath action",
+			yamlContent: `
+name: Test Workflow
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: gdcorp-actions/apps-change-orders/create@v1.0.0
+      - run: echo "Testing subpath action"
+`,
+			expectedLen:  1,
+			expectedName: "gdcorp-actions/apps-change-orders/create@v1.0.0",
+		},
 	}
 
 	for _, tt := range tests {
@@ -181,6 +197,74 @@ func TestDetectVersionStyle(t *testing.T) {
 
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestParseActionWithSubpath(t *testing.T) {
+	ctx := context.Background()
+
+	// Mock tags for testing
+	mockTags := []api.Tag{
+		{
+			Name: "v1.0.0",
+			Commit: api.Commit{
+				Sha: "abc123def456abc123def456abc123def456ab12",
+				URL: "https://api.github.com/repos/test/repo/git/commits/abc123",
+			},
+		},
+	}
+
+	mockAPI := NewMockGitHubAPI(mockTags, nil)
+
+	tests := []struct {
+		name            string
+		actionValue     string
+		expectedOwner   string
+		expectedRepo    string
+		expectedSubpath string
+		expectedRef     string
+	}{
+		{
+			name:            "action with subpath",
+			actionValue:     "gdcorp-actions/apps-change-orders/create@v1.0.0",
+			expectedOwner:   "gdcorp-actions",
+			expectedRepo:    "apps-change-orders",
+			expectedSubpath: "create",
+			expectedRef:     "gdcorp-actions/apps-change-orders/create",
+		},
+		{
+			name:            "action with deep subpath",
+			actionValue:     "owner/repo/path/to/action@v1.0.0",
+			expectedOwner:   "owner",
+			expectedRepo:    "repo",
+			expectedSubpath: "path/to/action",
+			expectedRef:     "owner/repo/path/to/action",
+		},
+		{
+			name:            "regular action without subpath",
+			actionValue:     "actions/checkout@v1.0.0",
+			expectedOwner:   "actions",
+			expectedRepo:    "checkout",
+			expectedSubpath: "",
+			expectedRef:     "actions/checkout",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			action := Action{
+				FilePath: "test.yml",
+				Node:     yaml.Node{Value: tt.actionValue},
+			}
+
+			result, err := parseAction(ctx, action, mockAPI)
+			require.NoError(t, err)
+
+			require.Equal(t, tt.expectedOwner, result.Owner)
+			require.Equal(t, tt.expectedRepo, result.Repo)
+			require.Equal(t, tt.expectedSubpath, result.Subpath)
+			require.Equal(t, tt.expectedRef, result.ActionReference())
 		})
 	}
 }

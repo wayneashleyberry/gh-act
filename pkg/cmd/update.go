@@ -55,14 +55,14 @@ func updateFile(filepath string, updates []ParsedAction) error {
 		}
 
 		if update.VersionStyle == PinnedVersion {
-			line = before + fmt.Sprintf("uses: %s/%s@%s # %s", update.Owner, update.Repo, update.LatestVersionTag.Commit.GetSHA(), update.LatestVersionTag.GetName())
+			line = before + fmt.Sprintf("uses: %s@%s # %s", update.ActionReference(), update.LatestVersionTag.Commit.GetSHA(), update.LatestVersionTag.GetName())
 		} else {
 			newVersionString, err := update.NewVersionString()
 			if err != nil {
 				return fmt.Errorf("new version from latest version tag: %w", err)
 			}
 
-			line = before + fmt.Sprintf("uses: %s/%s@%s", update.Owner, update.Repo, newVersionString)
+			line = before + fmt.Sprintf("uses: %s@%s", update.ActionReference(), newVersionString)
 		}
 
 		lines[i] = line
