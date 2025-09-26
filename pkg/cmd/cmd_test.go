@@ -564,6 +564,7 @@ jobs:
 	// Create temporary file
 	tmpFile, err := os.CreateTemp("", "test-workflow-*.yml")
 	require.NoError(t, err)
+
 	defer os.Remove(tmpFile.Name())
 
 	_, err = tmpFile.WriteString(testContent)
@@ -595,12 +596,15 @@ jobs:
 
 	// Filter to just checkout action
 	var checkoutUpdate ParsedAction
+
 	for _, update := range updates {
 		if update.Repo == "checkout" {
 			checkoutUpdate = update
+
 			break
 		}
 	}
+
 	require.NotEmpty(t, checkoutUpdate.Node.Value)
 
 	// Update the file
@@ -610,6 +614,7 @@ jobs:
 	// Read the updated content
 	updatedContent, err := os.ReadFile(tmpFile.Name())
 	require.NoError(t, err)
+
 	updatedStr := string(updatedContent)
 
 	// Verify that the comment was updated to reflect the new version
@@ -647,6 +652,7 @@ jobs:
 
 	tmpFile2, err := os.CreateTemp("", "test-workflow2-*.yml")
 	require.NoError(t, err)
+
 	defer os.Remove(tmpFile2.Name())
 
 	_, err = tmpFile2.WriteString(testContent2)
@@ -665,6 +671,7 @@ jobs:
 	// Read the updated content
 	updatedContent2, err := os.ReadFile(tmpFile2.Name())
 	require.NoError(t, err)
+
 	updatedStr2 := string(updatedContent2)
 
 	// Verify that a comment was added even though there wasn't one before
