@@ -21,7 +21,7 @@ func ListOutdatedActions(ctx context.Context) error {
 		for _, action := range actions {
 			outdated, err := action.IsOutdated()
 			if err != nil {
-				slog.Debug("problem checking if action is outdated", slog.String("error.message", err.Error()))
+				slog.Debug("problem checking if action is outdated", slog.String("action", action.ActionReference()), slog.String("error.message", err.Error()))
 
 				continue
 			}

@@ -23,7 +23,7 @@ func PinActions(ctx context.Context) error {
 			return fmt.Errorf("get updates for file: %s: %w", filepath, err)
 		}
 
-		slog.Debug("pin file", slog.String("file.path", filepath))
+		slog.Debug("pin file", slog.String("file.path", filepath), slog.Int("action.count", len(actions)))
 
 		err = pinFile(filepath, actions)
 		if err != nil {
@@ -43,6 +43,8 @@ func pinFile(filepath string, updates []ParsedAction) error {
 	lines := strings.Split(string(data), "\n")
 
 	for _, update := range updates {
+		slog.Debug("pinning action", slog.String("action", update.ActionReference()), slog.String("file.path", filepath))
+
 		i := update.Node.Line - 1
 
 		line := lines[i]

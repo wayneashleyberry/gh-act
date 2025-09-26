@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 )
@@ -15,10 +16,14 @@ func UpdateActions(ctx context.Context, pin bool) error {
 	}
 
 	for _, filepath := range files {
+		slog.Debug("get updates for file", slog.String("file.path", filepath))
+
 		updates, err := parseActionsInFile(ctx, filepath)
 		if err != nil {
 			return fmt.Errorf("get updates for file: %w", err)
 		}
+
+		slog.Debug("update file", slog.String("file.path", filepath), slog.Int("action.count", len(updates)))
 
 		if pin {
 			for n, update := range updates {
@@ -45,6 +50,8 @@ func updateFile(filepath string, updates []ParsedAction) error {
 	lines := strings.Split(string(data), "\n")
 
 	for _, update := range updates {
+		slog.Debug("updating action", slog.String("action", update.ActionReference()), slog.String("file.path", filepath))
+
 		i := update.Node.Line - 1
 
 		line := lines[i]

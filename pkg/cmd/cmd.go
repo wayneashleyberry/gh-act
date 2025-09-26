@@ -104,7 +104,7 @@ func parseSteps(ctx context.Context, filepath string, parentNode *yaml.Node, key
 								Node:     *usesNode,
 							}, apiClient)
 							if err != nil {
-								slog.Debug("problem parsing action", slog.String("error.message", err.Error()))
+								slog.Debug("problem parsing action", slog.String("action", usesNode.Value), slog.String("error.message", err.Error()))
 
 								continue
 							}
@@ -198,7 +198,7 @@ func (p ParsedAction) IsOutdated() (bool, error) {
 
 var ErrCurrentVersionUnmatched = errors.New("could not match version tag to a tag or release on github (might be tagged to a commit)")
 
-func matchVersionToTag(rawVersion string, style VersionStyle, tags []api.Tag) (*api.Tag, error) {
+func matchVersionToTag(rawVersion string, style VersionStyle, tags []api.Tag, actionRef string) (*api.Tag, error) {
 	if style == PinnedVersion {
 		pinnedMatches := []api.Tag{}
 
@@ -223,7 +223,7 @@ func matchVersionToTag(rawVersion string, style VersionStyle, tags []api.Tag) (*
 
 		var specificTag api.Tag
 
-		slog.Debug("matched pinned commit hash to more than one tag", slog.String("version", rawVersion))
+		slog.Debug("matched pinned commit hash to more than one tag", slog.String("action", actionRef), slog.String("version", rawVersion))
 
 		for _, tag := range pinnedMatches {
 			if len(tag.GetName()) > len(specificTagName) {
@@ -245,6 +245,7 @@ func matchVersionToTag(rawVersion string, style VersionStyle, tags []api.Tag) (*
 		if err != nil {
 			slog.Debug(
 				"could not parse tag name as semantic version",
+				slog.String("action", actionRef),
 				slog.String("node.value", rawVersion),
 				slog.String("tag.name", tag.GetName()),
 				slog.String("error.message", err.Error()),
@@ -302,13 +303,13 @@ func parseAction(ctx context.Context, action Action, apiClient api.GitHubAPI) (P
 		return ParsedAction{}, fmt.Errorf("action has no tags: %s/%s", parsed.Owner, parsed.Repo)
 	}
 
-	matchedTag, err := matchVersionToTag(parsed.RawVersionString, parsed.VersionStyle, tags)
+	matchedTag, err := matchVersionToTag(parsed.RawVersionString, parsed.VersionStyle, tags, parsed.ActionReference())
 	if err != nil {
 		return parsed, fmt.Errorf("problem matching version to a tag: %w", err)
 	}
 
 	if matchedTag == nil {
-		slog.Debug("match version to tag didn't return an error or a tag", slog.String("action", action.Node.Value))
+		slog.Debug("match version to tag didn't return an error or a tag", slog.String("action", parsed.ActionReference()))
 	}
 
 	parsed.CurrentVersionTag = matchedTag
@@ -317,6 +318,7 @@ func parseAction(ctx context.Context, action Action, apiClient api.GitHubAPI) (P
 	if err != nil {
 		slog.Debug(
 			"details on problematic matched tag",
+			slog.String("action", parsed.ActionReference()),
 			slog.String("name", matchedTag.Name),
 			slog.String("commit.sha", matchedTag.Commit.Sha),
 			slog.String("commit.url", matchedTag.Commit.URL),
@@ -350,7 +352,7 @@ func parseAction(ctx context.Context, action Action, apiClient api.GitHubAPI) (P
 
 	pinConstraintString := ">=" + currentVersion.String() + " <" + nextVersion.String()
 
-	slog.Debug("constraint string: " + pinConstraintString)
+	slog.Debug("constraint string", slog.String("action", parsed.ActionReference()), slog.String("constraint", pinConstraintString))
 
 	pinConstraint, err := semver.NewConstraint(pinConstraintString)
 	if err != nil {
@@ -364,6 +366,7 @@ func parseAction(ctx context.Context, action Action, apiClient api.GitHubAPI) (P
 		if err != nil {
 			slog.Debug(
 				"could not parse tag name as semantic version",
+				slog.String("action", parsed.ActionReference()),
 				slog.String("node.value", action.Node.Value),
 				slog.String("tag.name", tag.GetName()),
 				slog.String("error.message", err.Error()),
