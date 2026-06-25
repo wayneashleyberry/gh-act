@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -11,12 +10,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// workflowsDir is the directory GitHub reads workflow files from.
-var workflowsDir = filepath.Join(".github", "workflows")
+// githubDir holds workflows and other configuration. Every YAML file beneath it
+// is scanned for action references.
+const githubDir = ".github"
 
-// skippedWalkDirs are directories excluded from the recursive search for
-// composite action definitions, to avoid scanning version-control internals
-// and vendored third-party code.
+// skippedWalkDirs are directories excluded from the repository-wide search for
+// composite action definitions, to avoid scanning version-control internals and
+// vendored third-party code.
 var skippedWalkDirs = map[string]bool{
 	".git":         true,
 	"node_modules": true,
@@ -30,11 +30,17 @@ type Action struct {
 	Node     yaml.Node
 }
 
-// findWorkflowFiles returns the YAML files that may contain action references:
-// every workflow under .github/workflows (which GitHub does not read
-// recursively) plus every composite action definition (action.yml /
-// action.yaml) found anywhere in the repository. A missing workflows directory
-// is not an error.
+// findWorkflowFiles returns every YAML file that may contain action references:
+//
+//   - all *.yml / *.yaml files anywhere under .github (workflows, including
+//     nested ones, composite actions, and any other configuration), and
+//   - every composite action definition (action.yml / action.yaml) elsewhere in
+//     the repository, for example at the root or within a monorepo subtree.
+//
+// The first set preserves the original scanning scope in full; the second
+// extends it to composite actions outside .github. The .git, node_modules and
+// vendor directories are skipped during the repository-wide search, and a
+// missing .github directory is not an error.
 func findWorkflowFiles() ([]string, error) {
 	seen := make(map[string]bool)
 
@@ -48,24 +54,25 @@ func findWorkflowFiles() ([]string, error) {
 		}
 	}
 
-	entries, err := os.ReadDir(workflowsDir)
-	switch {
-	case err == nil:
-		for _, entry := range entries {
-			if !entry.IsDir() && isYAMLFile(entry.Name()) {
-				add(filepath.Join(workflowsDir, entry.Name()))
-			}
+	// Every YAML file under .github, recursively (the historical scope).
+	if err := filepath.WalkDir(githubDir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil //nolint:nilerr // tolerate unreadable entries and a missing .github
 		}
-	case errors.Is(err, fs.ErrNotExist):
-		// No workflows directory: nothing to do here.
-	default:
-		return nil, fmt.Errorf("read workflows directory %q: %w", workflowsDir, err)
+
+		if !entry.IsDir() && isYAMLFile(entry.Name()) {
+			add(path)
+		}
+
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("scan %q: %w", githubDir, err)
 	}
 
-	walkErr := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
+	// Composite action definitions anywhere else in the repository.
+	if err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
-			// Tolerate unreadable entries rather than aborting the whole scan.
-			return nil //nolint:nilerr
+			return nil //nolint:nilerr // tolerate unreadable entries
 		}
 
 		if entry.IsDir() {
@@ -81,9 +88,8 @@ func findWorkflowFiles() ([]string, error) {
 		}
 
 		return nil
-	})
-	if walkErr != nil {
-		return nil, fmt.Errorf("scan for composite actions: %w", walkErr)
+	}); err != nil {
+		return nil, fmt.Errorf("scan for composite actions: %w", err)
 	}
 
 	return files, nil

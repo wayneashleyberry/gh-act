@@ -99,7 +99,10 @@ func TestFindWorkflowFiles(t *testing.T) {
 	writeFile(t, filepath.Join(".github", "workflows", "ci.yml"), "jobs: {}\n")
 	writeFile(t, filepath.Join(".github", "workflows", "release.yaml"), "jobs: {}\n")
 	writeFile(t, filepath.Join(".github", "workflows", "notes.txt"), "ignored\n")
-	// Composite actions: at the root, under .github/actions, and nested.
+	// Nested workflow and other .github YAML must still be scanned (historical scope).
+	writeFile(t, filepath.Join(".github", "workflows", "nested", "deep.yml"), "jobs: {}\n")
+	writeFile(t, filepath.Join(".github", "dependabot.yml"), "version: 2\n")
+	// Composite actions: at the root, under .github/actions, and elsewhere.
 	writeFile(t, "action.yml", "runs: {}\n")
 	writeFile(t, filepath.Join(".github", "actions", "setup", "action.yml"), "runs: {}\n")
 	writeFile(t, filepath.Join("tools", "deep", "action.yaml"), "runs: {}\n")
@@ -114,6 +117,8 @@ func TestFindWorkflowFiles(t *testing.T) {
 	require.ElementsMatch(t, []string{
 		filepath.Join(".github", "workflows", "ci.yml"),
 		filepath.Join(".github", "workflows", "release.yaml"),
+		filepath.Join(".github", "workflows", "nested", "deep.yml"),
+		filepath.Join(".github", "dependabot.yml"),
 		"action.yml",
 		filepath.Join(".github", "actions", "setup", "action.yml"),
 		filepath.Join("tools", "deep", "action.yaml"),

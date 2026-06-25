@@ -36,12 +36,13 @@ You should keep your GitHub Actions up to date, and pinned, but this makes them 
 
 `gh-act` looks for action references in:
 
-- Workflows in `.github/workflows/*.{yml,yaml}` — both step `uses:` and
-  job-level reusable workflow `uses:`.
-- Composite action definitions (`action.yml` / `action.yaml`) found anywhere in
-  the repository — for example at the root or under `.github/actions/` — using
-  their `runs.steps[].uses:` entries. The directories `.git`, `node_modules` and
-  `vendor` are skipped.
+- Every YAML file under `.github/` (recursively) — workflows (including nested
+  ones), composite actions, and other configuration — covering both step
+  `uses:` and job-level reusable workflow `uses:`.
+- Composite action definitions (`action.yml` / `action.yaml`) found anywhere
+  else in the repository, for example at the root or in a monorepo subtree,
+  using their `runs.steps[].uses:` entries. The directories `.git`,
+  `node_modules` and `vendor` are skipped during this repository-wide search.
 
 `gh act ls` lists every reference it finds, including local (`./…`) and Docker
 (`docker://…`) actions. The `pin`, `update` and `outdated` commands skip local
