@@ -1,13 +1,11 @@
 BINARY := gh-act
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -X=main.version=$(VERSION)
 
 .PHONY: all
 all: fmt lint test build
 
 .PHONY: build
 build:
-	go build -ldflags="$(LDFLAGS)" -o $(BINARY) .
+	go build -o $(BINARY) .
 
 .PHONY: install
 install:

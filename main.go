@@ -6,14 +6,48 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 
 	"github.com/urfave/cli/v3"
 	"github.com/wayneashleyberry/gh-act/pkg/cmd"
 )
 
-// version is overridden at build time via -ldflags "-X main.version=...".
-var version = "dev"
+// shortSHALen is how many characters of a commit SHA to display.
+const shortSHALen = 12
+
+// buildVersion returns the short commit SHA the binary was built from (with a
+// "-dirty" suffix for uncommitted changes), as embedded by the Go toolchain's
+// VCS stamping. It falls back to "dev" when no build info is available.
+func buildVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "dev"
+	}
+
+	var revision, dirty string
+
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = setting.Value
+		case "vcs.modified":
+			if setting.Value == "true" {
+				dirty = "-dirty"
+			}
+		}
+	}
+
+	if revision == "" {
+		return "dev"
+	}
+
+	if len(revision) > shortSHALen {
+		revision = revision[:shortSHALen]
+	}
+
+	return revision + dirty
+}
 
 func setDefaultLogger(level slog.Leveler) {
 	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -49,7 +83,7 @@ func run(ctx context.Context) error {
 	command := &cli.Command{
 		Name:    "act",
 		Usage:   "Update, manage and pin your GitHub Actions",
-		Version: version,
+		Version: buildVersion(),
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "debug",
