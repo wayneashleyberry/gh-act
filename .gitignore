@@ -1,3 +1,8 @@
 /gh-act
 /gh-act.exe
 /main
+
+# Release artifacts from cli/gh-extension-precompile. Ignored so they don't
+# count as uncommitted changes, which would stamp "+dirty" into the version
+# (act --version) of every binary built after the first.
+/dist/

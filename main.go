@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 	"syscall"
 
 	"github.com/urfave/cli/v3"
@@ -14,11 +15,13 @@ import (
 )
 
 // shortSHALen is how many characters of a commit SHA to display.
-const shortSHALen = 12
+const shortSHALen = 7
 
-// buildVersion returns the short commit SHA the binary was built from (with a
-// "-dirty" suffix for uncommitted changes), as embedded by the Go toolchain's
-// VCS stamping. It falls back to "dev" when no build info is available.
+// buildVersion derives the version shown by `act --version` from the build
+// info stamped by the Go toolchain. For a precompiled release (a clean build
+// at a git tag) it returns "<tag> (<short-sha>)". Otherwise it falls back to
+// the short commit SHA (with a "-dirty" suffix for uncommitted changes), or
+// "dev" when no build info is available.
 func buildVersion() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
@@ -38,15 +41,29 @@ func buildVersion() string {
 		}
 	}
 
-	if revision == "" {
+	short := revision
+	if len(short) > shortSHALen {
+		short = short[:shortSHALen]
+	}
+
+	// A clean tagged build (the release case) stamps the tag into
+	// Main.Version. Pseudo-versions embed the commit SHA, so exclude those.
+	tag := info.Main.Version
+	isPseudo := short != "" && strings.Contains(tag, short)
+
+	if tag != "" && tag != "(devel)" && !isPseudo {
+		if short == "" {
+			return tag
+		}
+
+		return fmt.Sprintf("%s (%s)", tag, short)
+	}
+
+	if short == "" {
 		return "dev"
 	}
 
-	if len(revision) > shortSHALen {
-		revision = revision[:shortSHALen]
-	}
-
-	return revision + dirty
+	return short + dirty
 }
 
 func setDefaultLogger(level slog.Leveler) {
