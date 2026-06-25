@@ -2,45 +2,60 @@ package main
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"github.com/wayneashleyberry/gh-act/pkg/cmd"
 )
 
+// version is overridden at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 func setDefaultLogger(level slog.Leveler) {
-	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: level,
 	})
 
-	logger := slog.New(handler)
-
-	slog.SetDefault(logger)
+	slog.SetDefault(slog.New(handler))
 }
 
 func main() {
-	ctx := context.Background()
-
-	if err := run(ctx); err != nil {
-		log.Fatal(err)
+	if err := main2(); err != nil {
+		fmt.Fprintln(os.Stderr, "act:", err)
+		os.Exit(1)
 	}
 }
 
-func run(_ context.Context) error {
+// main2 exists so that deferred cleanup (signal reset) runs before os.Exit.
+func main2() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return run(ctx)
+}
+
+func run(ctx context.Context) error {
 	setDefaultLogger(slog.LevelInfo)
 
-	app := &cli.App{
-		Name:  "act",
-		Usage: "Update, manage and pin your GitHub Actions",
+	dryRunFlag := &cli.BoolFlag{
+		Name:  "dry-run",
+		Usage: "Print the changes that would be made without writing any files",
+	}
+
+	command := &cli.Command{
+		Name:    "act",
+		Usage:   "Update, manage and pin your GitHub Actions",
+		Version: version,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "debug",
-				Value: false,
 				Usage: "Print debug logs",
-				Action: func(_ *cli.Context, v bool) error {
-					if v {
+				Action: func(_ context.Context, _ *cli.Command, value bool) error {
+					if value {
 						setDefaultLogger(slog.LevelDebug)
 					}
 
@@ -52,40 +67,56 @@ func run(_ context.Context) error {
 			{
 				Name:  "ls",
 				Usage: "List used actions",
-				Action: func(_ *cli.Context) error {
+				Action: func(_ context.Context, _ *cli.Command) error {
 					return cmd.ListActions()
 				},
 			},
 			{
 				Name:  "outdated",
 				Usage: "Check for outdated actions",
-				Action: func(ctx *cli.Context) error {
-					return cmd.ListOutdatedActions(ctx.Context)
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:  "exit-code",
+						Usage: "Exit with a non-zero status when outdated actions are found",
+					},
+				},
+				Action: func(ctx context.Context, c *cli.Command) error {
+					found, err := cmd.ListOutdatedActions(ctx)
+					if err != nil {
+						return err
+					}
+
+					if c.Bool("exit-code") && found {
+						return cli.Exit("", 1)
+					}
+
+					return nil
 				},
 			},
 			{
 				Name:  "update",
 				Usage: "Update actions (supports branch references like @main when using --pin)",
-				Action: func(ctx *cli.Context) error {
-					return cmd.UpdateActions(ctx.Context, ctx.Bool("pin"))
-				},
 				Flags: []cli.Flag{
 					&cli.BoolFlag{
 						Name:  "pin",
-						Value: false,
 						Usage: "Pin actions after updating them (required for branch references like @main)",
 					},
+					dryRunFlag,
+				},
+				Action: func(ctx context.Context, c *cli.Command) error {
+					return cmd.UpdateActions(ctx, c.Bool("pin"), c.Bool("dry-run"))
 				},
 			},
 			{
 				Name:  "pin",
 				Usage: "Pin used actions",
-				Action: func(ctx *cli.Context) error {
-					return cmd.PinActions(ctx.Context)
+				Flags: []cli.Flag{dryRunFlag},
+				Action: func(ctx context.Context, c *cli.Command) error {
+					return cmd.PinActions(ctx, c.Bool("dry-run"))
 				},
 			},
 		},
 	}
 
-	return app.Run(os.Args)
+	return command.Run(ctx, os.Args)
 }

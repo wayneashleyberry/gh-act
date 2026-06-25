@@ -1,23 +1,23 @@
+// Package api provides a thin, cached client over the GitHub REST API for the
+// tags and repository metadata that gh-act needs to resolve action versions.
 package api
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
-	"time"
+	"net/http"
+	"strings"
+	"sync"
 
-	"github.com/cli/go-gh/v2"
-	"github.com/patrickmn/go-cache"
+	"github.com/cli/go-gh/v2/pkg/api"
+	"golang.org/x/sync/singleflight"
 )
 
-var c *cache.Cache
+// perPage is the maximum page size GitHub allows for list endpoints.
+const perPage = 100
 
-func init() {
-	c = cache.New(5*time.Minute, 10*time.Minute)
-}
-
-// Repository represents basic repository information from GitHub API.
+// Repository represents basic repository information from the GitHub API.
 type Repository struct {
 	Name          string `json:"name"`
 	FullName      string `json:"full_name"`
@@ -25,25 +25,13 @@ type Repository struct {
 	Private       bool   `json:"private"`
 }
 
-// GitHubAPI defines the interface for GitHub API operations.
-type GitHubAPI interface {
-	FetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error)
-	FetchRepository(ctx context.Context, owner, repo string) (*Repository, error)
-}
-
-// RealGitHubAPI implements GitHubAPI using the actual GitHub API.
-type RealGitHubAPI struct{}
-
-// NewRealGitHubAPI creates a new instance of RealGitHubAPI.
-func NewRealGitHubAPI() *RealGitHubAPI {
-	return &RealGitHubAPI{}
-}
-
+// Commit is the git commit a tag points at.
 type Commit struct {
 	Sha string `json:"sha"`
 	URL string `json:"url"`
 }
 
+// Tag is a single git tag as returned by the GitHub tags endpoint.
 type Tag struct {
 	Name       string `json:"name"`
 	ZipballURL string `json:"zipball_url"`
@@ -52,6 +40,7 @@ type Tag struct {
 	NodeID     string `json:"node_id"`
 }
 
+// GetName returns the tag name, or an empty string if the tag is nil.
 func (t *Tag) GetName() string {
 	if t != nil {
 		return t.Name
@@ -60,6 +49,7 @@ func (t *Tag) GetName() string {
 	return ""
 }
 
+// GetSHA returns the commit SHA, or an empty string if the commit is nil.
 func (c *Commit) GetSHA() string {
 	if c != nil {
 		return c.Sha
@@ -68,68 +58,183 @@ func (c *Commit) GetSHA() string {
 	return ""
 }
 
-func (r *RealGitHubAPI) FetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error) {
-	return FetchAllTags(ctx, owner, repo)
+// GitHubAPI defines the GitHub operations gh-act depends on. It is satisfied by
+// Client and can be replaced with a fake in tests.
+type GitHubAPI interface {
+	FetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error)
+	FetchRepository(ctx context.Context, owner, repo string) (*Repository, error)
 }
 
-func (r *RealGitHubAPI) FetchRepository(ctx context.Context, owner, repo string) (*Repository, error) {
-	return FetchRepository(ctx, owner, repo)
+// Client is a concurrency-safe GitHub API client. Identical requests issued
+// during a single run are de-duplicated via singleflight and memoised in
+// process, so resolving the same action across many workflow files only hits
+// the network once.
+type Client struct {
+	rest *api.RESTClient
+
+	group singleflight.Group
+
+	mu        sync.Mutex
+	tagCache  map[string][]Tag
+	repoCache map[string]*Repository
 }
 
-func FetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error) {
-	cacheKey := fmt.Sprintf("github.tags.all.%s.%s", owner, repo)
-
-	cachedTags, found := c.Get(cacheKey)
-	if found {
-		slog.Debug(fmt.Sprintf("using cache for %s/%s", owner, repo))
-
-		return cachedTags.([]Tag), nil
-	}
-
-	path := fmt.Sprintf("/repos/%s/%s/tags", owner, repo)
-
-	b, _, err := gh.ExecContext(ctx, "api", path, "--paginate")
+// NewClient creates a Client backed by the user's existing gh authentication.
+func NewClient() (*Client, error) {
+	rest, err := api.DefaultRESTClient()
 	if err != nil {
-		return []Tag{}, err
+		return nil, fmt.Errorf("create REST client: %w", err)
 	}
 
-	tags := []Tag{}
+	return &Client{
+		rest:      rest,
+		tagCache:  make(map[string][]Tag),
+		repoCache: make(map[string]*Repository),
+	}, nil
+}
 
-	err = json.Unmarshal(b.Bytes(), &tags)
+// FetchAllTags returns every tag for owner/repo, following pagination. Results
+// are cached and de-duplicated for the lifetime of the Client.
+func (c *Client) FetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error) {
+	key := owner + "/" + repo
+
+	c.mu.Lock()
+	cached, ok := c.tagCache[key]
+	c.mu.Unlock()
+
+	if ok {
+		return cached, nil
+	}
+
+	result, err, _ := c.group.Do("tags:"+key, func() (any, error) {
+		tags, err := c.fetchAllTags(ctx, owner, repo)
+		if err != nil {
+			return nil, err
+		}
+
+		c.mu.Lock()
+		c.tagCache[key] = tags
+		c.mu.Unlock()
+
+		return tags, nil
+	})
 	if err != nil {
-		return []Tag{}, err
+		return nil, err
 	}
 
-	c.Set(cacheKey, tags, cache.DefaultExpiration)
+	tags, ok := result.([]Tag)
+	if !ok {
+		return nil, fmt.Errorf("unexpected cache type for %s", key)
+	}
 
 	return tags, nil
 }
 
-func FetchRepository(ctx context.Context, owner, repo string) (*Repository, error) {
-	cacheKey := fmt.Sprintf("github.repository.%s.%s", owner, repo)
+// FetchRepository returns metadata for owner/repo, cached for the lifetime of
+// the Client.
+func (c *Client) FetchRepository(ctx context.Context, owner, repo string) (*Repository, error) {
+	key := owner + "/" + repo
 
-	cachedRepo, found := c.Get(cacheKey)
-	if found {
-		slog.Debug(fmt.Sprintf("using cache for repository %s/%s", owner, repo))
+	c.mu.Lock()
+	cached, ok := c.repoCache[key]
+	c.mu.Unlock()
 
-		return cachedRepo.(*Repository), nil
+	if ok {
+		return cached, nil
 	}
 
-	path := fmt.Sprintf("/repos/%s/%s", owner, repo)
+	result, err, _ := c.group.Do("repo:"+key, func() (any, error) {
+		repository, err := c.fetchRepository(ctx, owner, repo)
+		if err != nil {
+			return nil, err
+		}
 
-	b, _, err := gh.ExecContext(ctx, "api", path)
+		c.mu.Lock()
+		c.repoCache[key] = repository
+		c.mu.Unlock()
+
+		return repository, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("fetch repository info: %w", err)
+		return nil, err
 	}
+
+	repository, ok := result.(*Repository)
+	if !ok {
+		return nil, fmt.Errorf("unexpected cache type for %s", key)
+	}
+
+	return repository, nil
+}
+
+func (c *Client) fetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error) {
+	var tags []Tag
+
+	path := fmt.Sprintf("repos/%s/%s/tags?per_page=%d", owner, repo, perPage)
+
+	for path != "" {
+		resp, err := c.rest.RequestWithContext(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, fmt.Errorf("fetch tags for %s/%s: %w", owner, repo, err)
+		}
+
+		var page []Tag
+
+		err = json.NewDecoder(resp.Body).Decode(&page)
+
+		closeErr := resp.Body.Close()
+
+		if err != nil {
+			return nil, fmt.Errorf("decode tags for %s/%s: %w", owner, repo, err)
+		}
+
+		if closeErr != nil {
+			return nil, fmt.Errorf("close response body for %s/%s: %w", owner, repo, closeErr)
+		}
+
+		tags = append(tags, page...)
+		path = nextPagePath(resp.Header.Get("Link"))
+	}
+
+	return tags, nil
+}
+
+func (c *Client) fetchRepository(ctx context.Context, owner, repo string) (*Repository, error) {
+	path := fmt.Sprintf("repos/%s/%s", owner, repo)
 
 	var repository Repository
 
-	err = json.Unmarshal(b.Bytes(), &repository)
+	err := c.rest.DoWithContext(ctx, http.MethodGet, path, nil, &repository)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal repository info: %w", err)
+		return nil, fmt.Errorf("fetch repository info for %s/%s: %w", owner, repo, err)
 	}
 
-	c.Set(cacheKey, &repository, cache.DefaultExpiration)
-
 	return &repository, nil
+}
+
+// nextPagePath extracts the rel="next" URL from a GitHub Link header. It
+// returns an empty string when there is no further page.
+func nextPagePath(linkHeader string) string {
+	if linkHeader == "" {
+		return ""
+	}
+
+	for _, link := range strings.Split(linkHeader, ",") {
+		sections := strings.Split(link, ";")
+		if len(sections) < 2 {
+			continue
+		}
+
+		url := strings.TrimSpace(sections[0])
+		url = strings.TrimPrefix(url, "<")
+		url = strings.TrimSuffix(url, ">")
+
+		for _, section := range sections[1:] {
+			if strings.TrimSpace(section) == `rel="next"` {
+				return url
+			}
+		}
+	}
+
+	return ""
 }

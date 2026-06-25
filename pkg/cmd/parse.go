@@ -1,0 +1,207 @@
+package cmd
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+// workflowsDir is the directory GitHub reads workflow files from.
+var workflowsDir = filepath.Join(".github", "workflows")
+
+// compositeActionFiles are the conventional locations of a composite action
+// definition, relative to the repository root.
+var compositeActionFiles = []string{
+	"action.yml",
+	"action.yaml",
+	filepath.Join(".github", "action.yml"),
+	filepath.Join(".github", "action.yaml"),
+}
+
+// Action is a raw `uses:` reference discovered in a YAML file, before any
+// network resolution has happened.
+type Action struct {
+	FilePath string
+	Node     yaml.Node
+}
+
+// findWorkflowFiles returns the YAML files that may contain action references:
+// every workflow under .github/workflows plus any composite action definition
+// at a conventional location. A missing directory is not an error.
+func findWorkflowFiles() ([]string, error) {
+	var files []string
+
+	entries, err := os.ReadDir(workflowsDir)
+	switch {
+	case err == nil:
+		for _, entry := range entries {
+			if entry.IsDir() || !isYAMLFile(entry.Name()) {
+				continue
+			}
+
+			files = append(files, filepath.Join(workflowsDir, entry.Name()))
+		}
+	case errors.Is(err, fs.ErrNotExist):
+		// No workflows directory: nothing to do here.
+	default:
+		return nil, fmt.Errorf("read workflows directory %q: %w", workflowsDir, err)
+	}
+
+	for _, path := range compositeActionFiles {
+		if info, statErr := os.Stat(path); statErr == nil && !info.IsDir() {
+			files = append(files, path)
+		}
+	}
+
+	return files, nil
+}
+
+func isYAMLFile(name string) bool {
+	ext := filepath.Ext(name)
+
+	return ext == ".yml" || ext == ".yaml"
+}
+
+// collectActionRefs discovers every workflow/composite file and returns the
+// file list (in scan order) alongside the flat list of action references found
+// across them.
+func collectActionRefs() ([]string, []Action, error) {
+	files, err := findWorkflowFiles()
+	if err != nil {
+		return nil, nil, fmt.Errorf("find workflow files: %w", err)
+	}
+
+	var refs []Action
+
+	for _, filePath := range files {
+		found, err := findActionRefsInFile(filePath)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		refs = append(refs, found...)
+	}
+
+	return files, refs, nil
+}
+
+// findActionRefsInFile parses a single YAML file and returns the external
+// action references it contains.
+func findActionRefsInFile(filePath string) ([]Action, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read file %q: %w", filePath, err)
+	}
+
+	return parseActionRefs(data, filePath)
+}
+
+// parseActionRefs extracts external `uses:` references from workflow and
+// composite-action YAML. It understands job steps (jobs.*.steps[].uses),
+// reusable workflow calls (jobs.*.uses) and composite action steps
+// (runs.steps[].uses). Local (./, docker://) references are skipped.
+func parseActionRefs(data []byte, filePath string) ([]Action, error) {
+	var doc yaml.Node
+
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("unmarshal YAML in %q: %w", filePath, err)
+	}
+
+	if len(doc.Content) == 0 {
+		return nil, nil
+	}
+
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return nil, nil
+	}
+
+	var actions []Action
+
+	if jobs := mappingValue(root, "jobs"); jobs != nil && jobs.Kind == yaml.MappingNode {
+		for i := 1; i < len(jobs.Content); i += 2 {
+			job := jobs.Content[i]
+			if job.Kind != yaml.MappingNode {
+				continue
+			}
+
+			// Reusable workflow call: jobs.<id>.uses.
+			if uses := mappingValue(job, "uses"); uses != nil {
+				actions = appendUses(actions, filePath, uses)
+			}
+
+			if steps := mappingValue(job, "steps"); steps != nil {
+				actions = appendStepActions(actions, filePath, steps)
+			}
+		}
+	}
+
+	// Composite action steps: runs.steps[].uses.
+	if runs := mappingValue(root, "runs"); runs != nil && runs.Kind == yaml.MappingNode {
+		if steps := mappingValue(runs, "steps"); steps != nil {
+			actions = appendStepActions(actions, filePath, steps)
+		}
+	}
+
+	return actions, nil
+}
+
+// appendStepActions appends the `uses:` reference of every step in a steps
+// sequence node.
+func appendStepActions(actions []Action, filePath string, steps *yaml.Node) []Action {
+	if steps.Kind != yaml.SequenceNode {
+		return actions
+	}
+
+	for _, step := range steps.Content {
+		if step.Kind != yaml.MappingNode {
+			continue
+		}
+
+		if uses := mappingValue(step, "uses"); uses != nil {
+			actions = appendUses(actions, filePath, uses)
+		}
+	}
+
+	return actions
+}
+
+// appendUses appends a single uses node unless it refers to a local or Docker
+// action, which gh-act cannot pin.
+func appendUses(actions []Action, filePath string, uses *yaml.Node) []Action {
+	value := uses.Value
+
+	if value == "" {
+		return actions
+	}
+
+	if strings.HasPrefix(value, ".") || strings.HasPrefix(value, "docker://") {
+		slog.Debug("ignoring non-pinnable action", slog.String("value", value))
+
+		return actions
+	}
+
+	return append(actions, Action{FilePath: filePath, Node: *uses})
+}
+
+// mappingValue returns the value node associated with key in a YAML mapping
+// node, or nil if the key is absent or node is not a mapping.
+func mappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+
+	return nil
+}

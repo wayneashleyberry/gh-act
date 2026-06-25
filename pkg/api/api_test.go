@@ -102,11 +102,40 @@ func TestMockGitHubAPI(t *testing.T) {
 	require.ErrorIs(t, err, expectedError)
 }
 
-func TestRealGitHubAPI(_ *testing.T) {
-	// This test just verifies the real API implements the interface correctly
-	api := NewRealGitHubAPI()
+func TestClientImplementsInterface(_ *testing.T) {
+	// Verify the real client implements the interface without requiring
+	// authentication to construct one.
+	var _ GitHubAPI = (*Client)(nil)
+}
 
-	var _ GitHubAPI = api // compile-time interface check
+func TestNextPagePath(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+		want   string
+	}{
+		{
+			name:   "empty header",
+			header: "",
+			want:   "",
+		},
+		{
+			name:   "next and last",
+			header: `<https://api.github.com/repos/o/r/tags?page=2>; rel="next", <https://api.github.com/repos/o/r/tags?page=5>; rel="last"`,
+			want:   "https://api.github.com/repos/o/r/tags?page=2",
+		},
+		{
+			name:   "only prev and first (no next)",
+			header: `<https://api.github.com/repos/o/r/tags?page=1>; rel="prev", <https://api.github.com/repos/o/r/tags?page=1>; rel="first"`,
+			want:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, nextPagePath(tt.header))
+		})
+	}
 }
 
 func TestRepositoryMockFunctionality(t *testing.T) {

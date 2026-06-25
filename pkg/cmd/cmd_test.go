@@ -327,7 +327,7 @@ func TestParseActionWithSubpath(t *testing.T) {
 				Node:     yaml.Node{Value: tt.actionValue},
 			}
 
-			result, err := parseAction(ctx, action, mockAPI)
+			result, err := resolveAction(ctx, action, mockAPI)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.expectedOwner, result.Owner)
@@ -473,7 +473,7 @@ func TestParseBranchReference(t *testing.T) {
 				Node:     yaml.Node{Value: tt.actionValue},
 			}
 
-			result, err := parseAction(ctx, action, mockAPI)
+			result, err := resolveAction(ctx, action, mockAPI)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -534,7 +534,7 @@ func TestBranchReferenceEdgeCases(t *testing.T) {
 				Node:     yaml.Node{Value: tt.actionValue},
 			}
 
-			_, err := parseAction(ctx, action, mockAPI)
+			_, err := resolveAction(ctx, action, mockAPI)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -608,7 +608,7 @@ jobs:
 	require.NotEmpty(t, checkoutUpdate.Node.Value)
 
 	// Update the file
-	err = updateFile(tmpFile.Name(), []ParsedAction{checkoutUpdate})
+	err = rewriteFile(tmpFile.Name(), []ParsedAction{checkoutUpdate}, modeUpdate, false)
 	require.NoError(t, err)
 
 	// Read the updated content
@@ -665,7 +665,7 @@ jobs:
 	require.Len(t, updates2, 1)
 
 	// Update the file
-	err = updateFile(tmpFile2.Name(), updates2)
+	err = rewriteFile(tmpFile2.Name(), updates2, modeUpdate, false)
 	require.NoError(t, err)
 
 	// Read the updated content

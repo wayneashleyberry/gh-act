@@ -2,6 +2,8 @@ package cmd
 
 import "fmt"
 
+// ListActions prints every external action reference found in the repository's
+// workflow and composite-action files. It performs no network calls.
 func ListActions() error {
 	actions, err := findActions()
 	if err != nil {
@@ -20,22 +22,13 @@ func ListActions() error {
 	return nil
 }
 
+// findActions discovers and parses every action reference across all workflow
+// and composite-action files.
 func findActions() ([]Action, error) {
-	yamlFiles, err := findYAMFiles()
+	_, refs, err := collectActionRefs()
 	if err != nil {
-		return []Action{}, fmt.Errorf("find yaml files: %w", err)
+		return nil, err
 	}
 
-	var actions []Action
-
-	for _, filePath := range yamlFiles {
-		findings, err := parseYAMLFile(filePath)
-		if err != nil {
-			return []Action{}, err
-		}
-
-		actions = append(actions, findings...)
-	}
-
-	return actions, nil
+	return refs, nil
 }

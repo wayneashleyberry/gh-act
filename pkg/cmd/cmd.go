@@ -1,3 +1,5 @@
+// Package cmd implements the gh-act subcommands: discovering, resolving,
+// reporting and rewriting the GitHub Actions referenced by a repository.
 package cmd
 
 import (
@@ -5,35 +7,46 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/wayneashleyberry/gh-act/pkg/api"
+	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 )
 
-var (
-	// Configuration.
-	workflowDirectory = ".github"
+// resolveConcurrency bounds how many actions are resolved against the GitHub
+// API at once.
+const resolveConcurrency = 8
 
-	// Patterns.
+// maxBranchNameLength caps how long a ref may be before we stop treating it as
+// a plausible branch name.
+const maxBranchNameLength = 100
+
+var (
+	// sha1Regex matches a full 40-character git SHA-1.
 	sha1Regex = regexp.MustCompile(`^[a-fA-F0-9]{40}$`)
-	// fully qualified semantic version (major.minor.patch).
+	// fullSemverRegex matches a fully qualified semantic version (major.minor.patch).
 	fullSemverRegex = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z-.]+)?(\+[0-9A-Za-z-.]+)?$`)
-	// semantic version with major and minor components (major.minor).
+	// minorSemverRegex matches a semantic version with major and minor components (major.minor).
 	minorSemverRegex = regexp.MustCompile(`^v?(\d+)\.(\d+)(-[0-9A-Za-z-.]+)?(\+[0-9A-Za-z-.]+)?$`)
-	// semantic version with only major component (major).
+	// majorSemverRegex matches a semantic version with only a major component (major).
 	majorSemverRegex = regexp.MustCompile(`^v?(\d+)(-[0-9A-Za-z-.]+)?(\+[0-9A-Za-z-.]+)?$`)
-	// valid git branch name pattern (simplified - allows common branch naming conventions).
+	// branchNameRegex matches common git branch naming conventions.
 	branchNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$`)
+	// pathSegmentRegex matches a single safe owner/repo/subpath segment.
+	pathSegmentRegex = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 )
 
+// ErrCurrentVersionUnmatched is returned when a referenced version cannot be
+// matched to any tag or release on GitHub.
+var ErrCurrentVersionUnmatched = errors.New("could not match version tag to a tag or release on github (might be tagged to a commit)")
+
+// VersionStyle describes how an action's version was expressed in YAML.
 type VersionStyle string
 
-var (
+const (
 	PinnedVersion                     = VersionStyle("pinned")
 	SemanticVersionFullyQualified     = VersionStyle("semver")
 	SemanticVersionPartiallyQualified = VersionStyle("semver-partial")
@@ -41,93 +54,7 @@ var (
 	BranchReference                   = VersionStyle("branch")
 )
 
-func parseActionsInString(ctx context.Context, yamlContent string, filepath string, apiClient api.GitHubAPI) ([]ParsedAction, error) {
-	var content map[string]yaml.Node
-
-	err := yaml.Unmarshal([]byte(yamlContent), &content)
-	if err != nil {
-		return []ParsedAction{}, fmt.Errorf("unable to unmarshal YAML: %w", err)
-	}
-
-	parsedActions := []ParsedAction{}
-
-	// Parse jobs.*.steps
-	jobsNode, ok := content["jobs"]
-	if ok {
-		for i := 0; i < len(jobsNode.Content); i += 2 {
-			jobContentNode := jobsNode.Content[i+1]
-			parsedActions = append(parsedActions, parseSteps(ctx, filepath, jobContentNode, "steps", apiClient)...)
-		}
-	}
-
-	// Parse runs.steps
-	runsNode, ok := content["runs"]
-	if ok {
-		parsedActions = append(parsedActions, parseSteps(ctx, filepath, &runsNode, "steps", apiClient)...)
-	}
-
-	return parsedActions, nil
-}
-
-func parseActionsInFile(ctx context.Context, filepath string) ([]ParsedAction, error) {
-	// Read the YAML file
-	data, err := os.ReadFile(filepath)
-	if err != nil {
-		return []ParsedAction{}, fmt.Errorf("unable to read file: %w", err)
-	}
-
-	apiClient := api.NewRealGitHubAPI()
-
-	return parseActionsInString(ctx, string(data), filepath, apiClient)
-}
-
-// Helper function to parse "steps" from a given node.
-func parseSteps(ctx context.Context, filepath string, parentNode *yaml.Node, key string, apiClient api.GitHubAPI) []ParsedAction {
-	parsedActions := []ParsedAction{}
-
-	for j := 0; j < len(parentNode.Content); j += 2 {
-		keyNode := parentNode.Content[j]
-		if keyNode.Value == key {
-			stepsNode := parentNode.Content[j+1]
-			for _, stepNode := range stepsNode.Content {
-				if stepNode.Kind == yaml.MappingNode {
-					for k := 0; k < len(stepNode.Content); k += 2 {
-						stepKeyNode := stepNode.Content[k]
-						if stepKeyNode.Value == "uses" {
-							usesNode := stepNode.Content[k+1]
-
-							if strings.HasPrefix(usesNode.Value, ".") {
-								slog.Debug("ignoring local action", slog.String("value", usesNode.Value))
-
-								continue
-							}
-
-							parsed, err := parseAction(ctx, Action{
-								FilePath: filepath,
-								Node:     *usesNode,
-							}, apiClient)
-							if err != nil {
-								slog.Debug("problem parsing action", slog.String("action", usesNode.Value), slog.String("error.message", err.Error()))
-
-								continue
-							}
-
-							parsedActions = append(parsedActions, parsed)
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return parsedActions
-}
-
-type Action struct {
-	FilePath string
-	Node     yaml.Node
-}
-
+// ParsedAction is an Action that has been resolved against the GitHub API.
 type ParsedAction struct {
 	FilePath          string
 	Node              yaml.Node
@@ -140,30 +67,35 @@ type ParsedAction struct {
 	VersionStyle      VersionStyle
 }
 
+// NewVersionString renders the latest version in the same style the action was
+// originally written (e.g. v4, v4.1 or v4.1.2).
 func (p ParsedAction) NewVersionString() (string, error) {
+	if p.LatestVersionTag == nil {
+		return "", errors.New("latest version tag is nil")
+	}
+
 	newVersion, err := semver.NewVersion(p.LatestVersionTag.GetName())
 	if err != nil {
 		return "", fmt.Errorf("new version from latest version tag: %w", err)
 	}
 
-	var newVersionString string
-
 	switch p.VersionStyle {
 	case BranchReference:
-		// For branch references, return the latest version tag name as-is
-		newVersionString = p.LatestVersionTag.GetName()
+		return p.LatestVersionTag.GetName(), nil
 	case SemanticVersionFullyQualified:
-		newVersionString = newVersion.String()
+		return newVersion.String(), nil
 	case SemanticVersionPartiallyQualified:
-		newVersionString = fmt.Sprintf("v%d.%d", newVersion.Major(), newVersion.Minor())
+		return fmt.Sprintf("v%d.%d", newVersion.Major(), newVersion.Minor()), nil
 	case SemanticVersionMajorComponentOnly:
-		newVersionString = fmt.Sprintf("v%d", newVersion.Major())
+		return fmt.Sprintf("v%d", newVersion.Major()), nil
+	case PinnedVersion:
+		return p.LatestVersionTag.GetName(), nil
+	default:
+		return "", fmt.Errorf("unsupported version style: %s", p.VersionStyle)
 	}
-
-	return newVersionString, nil
 }
 
-// ActionReference returns the formatted action reference (owner/repo/subpath).
+// ActionReference returns the owner/repo(/subpath) reference without a version.
 func (p ParsedAction) ActionReference() string {
 	if p.Subpath != "" {
 		return fmt.Sprintf("%s/%s/%s", p.Owner, p.Repo, p.Subpath)
@@ -172,9 +104,8 @@ func (p ParsedAction) ActionReference() string {
 	return fmt.Sprintf("%s/%s", p.Owner, p.Repo)
 }
 
+// IsOutdated reports whether a newer version than the one referenced exists.
 func (p ParsedAction) IsOutdated() (bool, error) {
-	var constraint string
-
 	if p.CurrentVersionTag == nil {
 		return false, fmt.Errorf("checking if parsed action is outdated, but current version tag is nil: %s", p.Node.Value)
 	}
@@ -183,15 +114,14 @@ func (p ParsedAction) IsOutdated() (bool, error) {
 		return false, fmt.Errorf("checking if parsed action is outdated, but latest version tag is nil: %s", p.Node.Value)
 	}
 
-	// Branch references are always considered "outdated" since they should be pinned
+	// Branch references should always be pinned, so treat them as outdated.
 	if p.VersionStyle == BranchReference {
 		return true, nil
 	}
 
+	constraint := "> " + p.RawVersionString
 	if p.VersionStyle == PinnedVersion {
 		constraint = "> " + p.CurrentVersionTag.GetName()
-	} else {
-		constraint = "> " + p.RawVersionString
 	}
 
 	c, err := semver.NewConstraint(constraint)
@@ -207,85 +137,76 @@ func (p ParsedAction) IsOutdated() (bool, error) {
 	return c.Check(latest), nil
 }
 
-var ErrCurrentVersionUnmatched = errors.New("could not match version tag to a tag or release on github (might be tagged to a commit)")
-
-func matchVersionToTag(rawVersion string, style VersionStyle, tags []api.Tag, actionRef string) (*api.Tag, error) {
-	if style == BranchReference {
-		return nil, errors.New("branch references should be handled by handleBranchReference, not matchVersionToTag")
-	}
-
-	if style == PinnedVersion {
-		pinnedMatches := []api.Tag{}
-
-		for _, tag := range tags {
-			if rawVersion == tag.Commit.GetSHA() {
-				pinnedMatches = append(pinnedMatches, tag)
-			}
-		}
-
-		if len(pinnedMatches) == 0 {
-			return nil, errors.New("pinned to a commit hash with no associated tag")
-		}
-
-		if len(pinnedMatches) == 1 {
-			return &pinnedMatches[0], nil
-		}
-
-		// Some projects, like actions/github-script, point multiple tags to
-		// the same commit. For example, v7 and v7.0.1 will have the same
-		// sha. In these kinds of scenarios, the more specific tag is chosen.
-		var specificTagName string
-
-		var specificTag api.Tag
-
-		slog.Debug("matched pinned commit hash to more than one tag", slog.String("action", actionRef), slog.String("version", rawVersion))
-
-		for _, tag := range pinnedMatches {
-			if len(tag.GetName()) > len(specificTagName) {
-				specificTagName = tag.GetName()
-				specificTag = tag
-			}
-		}
-
-		return &specificTag, nil
-	}
-
-	currentVersion, err := semver.NewVersion(rawVersion)
+// parseActionsInString parses and resolves every action reference in a single
+// YAML document.
+func parseActionsInString(ctx context.Context, yamlContent, filePath string, client api.GitHubAPI) ([]ParsedAction, error) {
+	refs, err := parseActionRefs([]byte(yamlContent), filePath)
 	if err != nil {
-		return nil, fmt.Errorf("parse raw version string: %s: %w", rawVersion, err)
+		return nil, err
 	}
 
-	for _, tag := range tags {
-		tagVersion, err := semver.NewVersion(tag.GetName())
-		if err != nil {
-			slog.Debug(
-				"could not parse tag name as semantic version",
-				slog.String("action", actionRef),
-				slog.String("node.value", rawVersion),
-				slog.String("tag.name", tag.GetName()),
-				slog.String("error.message", err.Error()),
-			)
-
-			continue
-		}
-
-		if currentVersion.Equal(tagVersion) {
-			return &tag, nil
-		}
-	}
-
-	return nil, errors.New("no match")
+	return resolveActions(ctx, refs, client)
 }
 
-func parseAction(ctx context.Context, action Action, apiClient api.GitHubAPI) (ParsedAction, error) {
+// resolveActions resolves every reference concurrently, preserving input order.
+// References that cannot be resolved are logged at debug level and skipped so a
+// single unusual action never aborts the whole run. Context cancellation is
+// propagated.
+func resolveActions(ctx context.Context, refs []Action, client api.GitHubAPI) ([]ParsedAction, error) {
+	resolved := make([]*ParsedAction, len(refs))
+
+	group, ctx := errgroup.WithContext(ctx)
+	group.SetLimit(resolveConcurrency)
+
+	for i, ref := range refs {
+		group.Go(func() error {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("resolve actions: %w", err)
+			}
+
+			parsed, err := resolveAction(ctx, ref, client)
+			if err != nil {
+				if ctx.Err() != nil {
+					return fmt.Errorf("resolve %s: %w", ref.Node.Value, err)
+				}
+
+				slog.Debug("problem parsing action", slog.String("action", ref.Node.Value), slog.String("error.message", err.Error()))
+
+				return nil
+			}
+
+			resolved[i] = &parsed
+
+			return nil
+		})
+	}
+
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+
+	actions := make([]ParsedAction, 0, len(resolved))
+
+	for _, action := range resolved {
+		if action != nil {
+			actions = append(actions, *action)
+		}
+	}
+
+	return actions, nil
+}
+
+// resolveAction parses an action reference and resolves its current, latest and
+// pin target tags against the GitHub API.
+func resolveAction(ctx context.Context, action Action, client api.GitHubAPI) (ParsedAction, error) {
 	parts := strings.Split(action.Node.Value, "@")
 	if len(parts) != 2 {
-		return ParsedAction{}, fmt.Errorf("too few parts: %s", action.Node.Value)
+		return ParsedAction{}, fmt.Errorf("expected exactly one '@' in reference: %s", action.Node.Value)
 	}
 
 	subParts := strings.Split(parts[0], "/")
 	if len(subParts) < 2 {
-		return ParsedAction{}, fmt.Errorf("too few parts: %s", action.Node.Value)
+		return ParsedAction{}, fmt.Errorf("expected owner/repo in reference: %s", action.Node.Value)
 	}
 
 	parsed := ParsedAction{
@@ -296,9 +217,12 @@ func parseAction(ctx context.Context, action Action, apiClient api.GitHubAPI) (P
 		Repo:             subParts[1],
 	}
 
-	// Handle subpath if present (e.g., gdcorp-actions/apps-change-orders/create@v2)
 	if len(subParts) > 2 {
 		parsed.Subpath = strings.Join(subParts[2:], "/")
+	}
+
+	if err := validateReference(parsed); err != nil {
+		return ParsedAction{}, err
 	}
 
 	style, err := detectVersionStyle(parsed.RawVersionString)
@@ -308,151 +232,63 @@ func parseAction(ctx context.Context, action Action, apiClient api.GitHubAPI) (P
 
 	parsed.VersionStyle = style
 
-	// Handle branch references specially
 	if style == BranchReference {
-		return handleBranchReference(ctx, parsed, apiClient)
+		return resolveBranchReference(ctx, parsed, client)
 	}
 
-	tags, err := apiClient.FetchAllTags(ctx, parsed.Owner, parsed.Repo)
+	tags, err := client.FetchAllTags(ctx, parsed.Owner, parsed.Repo)
 	if err != nil {
-		return parsed, fmt.Errorf("fetch all tags: %w", err)
+		return ParsedAction{}, fmt.Errorf("fetch all tags: %w", err)
 	}
 
-	// If there are no tags on a repo then we can't do much.
 	if len(tags) == 0 {
 		return ParsedAction{}, fmt.Errorf("action has no tags: %s/%s", parsed.Owner, parsed.Repo)
 	}
 
 	matchedTag, err := matchVersionToTag(parsed.RawVersionString, parsed.VersionStyle, tags, parsed.ActionReference())
 	if err != nil {
-		return parsed, fmt.Errorf("problem matching version to a tag: %w", err)
-	}
-
-	if matchedTag == nil {
-		slog.Debug("match version to tag didn't return an error or a tag", slog.String("action", parsed.ActionReference()))
+		return ParsedAction{}, fmt.Errorf("problem matching version to a tag: %w", err)
 	}
 
 	parsed.CurrentVersionTag = matchedTag
 
 	currentVersion, err := semver.NewVersion(matchedTag.GetName())
 	if err != nil {
-		slog.Debug(
-			"details on problematic matched tag",
-			slog.String("action", parsed.ActionReference()),
-			slog.String("name", matchedTag.Name),
-			slog.String("commit.sha", matchedTag.Commit.Sha),
-			slog.String("commit.url", matchedTag.Commit.URL),
-		)
-
-		return parsed, fmt.Errorf("parse semantic version: %s: %w", matchedTag.GetName(), err)
+		return ParsedAction{}, fmt.Errorf("parse semantic version: %s: %w", matchedTag.GetName(), err)
 	}
 
-	var latestVersion *semver.Version
-
-	var latestTag *api.Tag
-
-	pinVersionTag := parsed.CurrentVersionTag
-
-	nextVersion := currentVersion
-
-	if parsed.VersionStyle == SemanticVersionFullyQualified {
-		incPatch := currentVersion.IncPatch()
-		nextVersion = &incPatch
-	}
-
-	if parsed.VersionStyle == SemanticVersionPartiallyQualified {
-		incMinor := currentVersion.IncMinor()
-		nextVersion = &incMinor
-	}
-
-	if parsed.VersionStyle == SemanticVersionMajorComponentOnly {
-		incMajor := currentVersion.IncMajor()
-		nextVersion = &incMajor
-	}
-
-	pinConstraintString := ">=" + currentVersion.String() + " <" + nextVersion.String()
-
-	slog.Debug("constraint string", slog.String("action", parsed.ActionReference()), slog.String("constraint", pinConstraintString))
-
-	pinConstraint, err := semver.NewConstraint(pinConstraintString)
+	latestTag, pinTag, err := selectLatestAndPin(parsed, currentVersion, tags)
 	if err != nil {
-		return parsed, fmt.Errorf("new constraint: %w", err)
-	}
-
-	pinVersion := currentVersion
-
-	for _, tag := range tags {
-		tagVersion, err := semver.NewVersion(tag.GetName())
-		if err != nil {
-			slog.Debug(
-				"could not parse tag name as semantic version",
-				slog.String("action", parsed.ActionReference()),
-				slog.String("node.value", action.Node.Value),
-				slog.String("tag.name", tag.GetName()),
-				slog.String("error.message", err.Error()),
-			)
-
-			continue
-		}
-
-		// Exclude pre-release versions (alpha, beta, rc, etc.)
-		if tagVersion.Prerelease() != "" {
-			continue
-		}
-
-		if latestVersion == nil {
-			latestVersion = tagVersion
-			latestTag = &tag
-		}
-
-		if tagVersion.GreaterThan(latestVersion) {
-			latestVersion = tagVersion
-			latestTag = &tag
-		}
-
-		if tagVersion.GreaterThan(pinVersion) && pinConstraint.Check(tagVersion) {
-			pinVersion = tagVersion
-			pinVersionTag = &tag
-		}
+		return ParsedAction{}, err
 	}
 
 	parsed.LatestVersionTag = latestTag
-	parsed.PinVersionTag = pinVersionTag
+	parsed.PinVersionTag = pinTag
 
 	return parsed, nil
 }
 
-func handleBranchReference(ctx context.Context, parsed ParsedAction, apiClient api.GitHubAPI) (ParsedAction, error) {
-	// Fetch repository information to get the default branch
-	repo, err := apiClient.FetchRepository(ctx, parsed.Owner, parsed.Repo)
+// selectLatestAndPin walks the tag list once and returns the absolute latest
+// non-prerelease version and the highest version that satisfies the pin
+// constraint for the action's version style.
+func selectLatestAndPin(parsed ParsedAction, currentVersion *semver.Version, tags []api.Tag) (*api.Tag, *api.Tag, error) {
+	nextVersion := nextVersionForStyle(parsed.VersionStyle, currentVersion)
+
+	pinConstraint, err := semver.NewConstraint(">=" + currentVersion.String() + " <" + nextVersion.String())
 	if err != nil {
-		return parsed, fmt.Errorf("fetch repository info: %w", err)
+		return nil, nil, fmt.Errorf("new constraint: %w", err)
 	}
 
-	// Check if the branch reference matches the default branch
-	if parsed.RawVersionString != repo.DefaultBranch {
-		return parsed, fmt.Errorf("branch reference '%s' is not the default branch ('%s'). Only default branch references are supported", parsed.RawVersionString, repo.DefaultBranch)
-	}
-
-	slog.Debug("detected default branch reference", slog.String("action", parsed.ActionReference()), slog.String("branch", parsed.RawVersionString))
-
-	// Fetch tags to find the latest version
-	tags, err := apiClient.FetchAllTags(ctx, parsed.Owner, parsed.Repo)
-	if err != nil {
-		return parsed, fmt.Errorf("fetch all tags: %w", err)
-	}
-
-	if len(tags) == 0 {
-		return parsed, fmt.Errorf("action has no tags: %s/%s (cannot resolve branch reference to a version)", parsed.Owner, parsed.Repo)
-	}
-
-	// Find the latest non-prerelease version
 	var (
 		latestVersion *semver.Version
 		latestTag     *api.Tag
+		pinVersion    = currentVersion
+		pinTag        = parsed.CurrentVersionTag
 	)
 
-	for _, tag := range tags {
+	for i := range tags {
+		tag := &tags[i]
+
 		tagVersion, err := semver.NewVersion(tag.GetName())
 		if err != nil {
 			slog.Debug(
@@ -465,23 +301,102 @@ func handleBranchReference(ctx context.Context, parsed ParsedAction, apiClient a
 			continue
 		}
 
-		// Exclude pre-release versions (alpha, beta, rc, etc.)
 		if tagVersion.Prerelease() != "" {
 			continue
 		}
 
 		if latestVersion == nil || tagVersion.GreaterThan(latestVersion) {
 			latestVersion = tagVersion
-			latestTag = &tag
+			latestTag = tag
+		}
+
+		if tagVersion.GreaterThan(pinVersion) && pinConstraint.Check(tagVersion) {
+			pinVersion = tagVersion
+			pinTag = tag
 		}
 	}
 
 	if latestTag == nil {
-		return parsed, fmt.Errorf("no valid semantic version tags found for %s/%s", parsed.Owner, parsed.Repo)
+		return nil, nil, fmt.Errorf("no non-prerelease semantic version tags found for %s", parsed.ActionReference())
 	}
 
-	// For branch references, we set both current and latest to the same latest version
-	// since the branch is essentially "floating" to the latest
+	return latestTag, pinTag, nil
+}
+
+// nextVersionForStyle returns the exclusive upper bound used to keep a pin
+// within the same precision the action was written at.
+func nextVersionForStyle(style VersionStyle, current *semver.Version) *semver.Version {
+	switch style {
+	case SemanticVersionFullyQualified:
+		next := current.IncPatch()
+
+		return &next
+	case SemanticVersionPartiallyQualified:
+		next := current.IncMinor()
+
+		return &next
+	case SemanticVersionMajorComponentOnly:
+		next := current.IncMajor()
+
+		return &next
+	case PinnedVersion, BranchReference:
+		return current
+	default:
+		return current
+	}
+}
+
+// resolveBranchReference handles actions referenced by a branch. Only the
+// repository's default branch is allowed, and it is resolved to the latest
+// tagged version.
+func resolveBranchReference(ctx context.Context, parsed ParsedAction, client api.GitHubAPI) (ParsedAction, error) {
+	repo, err := client.FetchRepository(ctx, parsed.Owner, parsed.Repo)
+	if err != nil {
+		return ParsedAction{}, fmt.Errorf("fetch repository info: %w", err)
+	}
+
+	if parsed.RawVersionString != repo.DefaultBranch {
+		return ParsedAction{}, fmt.Errorf("branch reference %q is not the default branch (%q); only default branch references are supported", parsed.RawVersionString, repo.DefaultBranch)
+	}
+
+	slog.Debug("detected default branch reference", slog.String("action", parsed.ActionReference()), slog.String("branch", parsed.RawVersionString))
+
+	tags, err := client.FetchAllTags(ctx, parsed.Owner, parsed.Repo)
+	if err != nil {
+		return ParsedAction{}, fmt.Errorf("fetch all tags: %w", err)
+	}
+
+	if len(tags) == 0 {
+		return ParsedAction{}, fmt.Errorf("action has no tags: %s/%s (cannot resolve branch reference to a version)", parsed.Owner, parsed.Repo)
+	}
+
+	var (
+		latestVersion *semver.Version
+		latestTag     *api.Tag
+	)
+
+	for i := range tags {
+		tag := &tags[i]
+
+		tagVersion, err := semver.NewVersion(tag.GetName())
+		if err != nil {
+			continue
+		}
+
+		if tagVersion.Prerelease() != "" {
+			continue
+		}
+
+		if latestVersion == nil || tagVersion.GreaterThan(latestVersion) {
+			latestVersion = tagVersion
+			latestTag = tag
+		}
+	}
+
+	if latestTag == nil {
+		return ParsedAction{}, fmt.Errorf("no valid semantic version tags found for %s/%s", parsed.Owner, parsed.Repo)
+	}
+
 	parsed.CurrentVersionTag = latestTag
 	parsed.LatestVersionTag = latestTag
 	parsed.PinVersionTag = latestTag
@@ -489,98 +404,135 @@ func handleBranchReference(ctx context.Context, parsed ParsedAction, apiClient a
 	return parsed, nil
 }
 
-func findYAMFiles() ([]string, error) {
-	var yamlFiles []string
+// matchVersionToTag resolves the raw version reference to the specific tag it
+// points at.
+func matchVersionToTag(rawVersion string, style VersionStyle, tags []api.Tag, actionRef string) (*api.Tag, error) {
+	if style == BranchReference {
+		return nil, errors.New("branch references must be handled by resolveBranchReference")
+	}
 
-	err := filepath.Walk(workflowDirectory, func(path string, info os.FileInfo, err error) error {
+	if style == PinnedVersion {
+		return matchPinnedTag(rawVersion, tags, actionRef)
+	}
+
+	currentVersion, err := semver.NewVersion(rawVersion)
+	if err != nil {
+		return nil, fmt.Errorf("parse raw version string: %s: %w", rawVersion, err)
+	}
+
+	for i := range tags {
+		tagVersion, err := semver.NewVersion(tags[i].GetName())
 		if err != nil {
-			return err
+			continue
 		}
 
-		// Check if the file has a .yaml or .yml extension
-		if !info.IsDir() && (filepath.Ext(path) == ".yaml" || filepath.Ext(path) == ".yml") {
-			yamlFiles = append(yamlFiles, path)
+		if currentVersion.Equal(tagVersion) {
+			return &tags[i], nil
+		}
+	}
+
+	return nil, ErrCurrentVersionUnmatched
+}
+
+// matchPinnedTag resolves a pinned SHA to its tag. When several tags point at
+// the same commit (e.g. v7 and v7.0.1) the most specific is chosen: the highest
+// semantic version, falling back to the longest tag name for non-semver tags.
+func matchPinnedTag(sha string, tags []api.Tag, actionRef string) (*api.Tag, error) {
+	var matches []*api.Tag
+
+	for i := range tags {
+		if sha == tags[i].Commit.GetSHA() {
+			matches = append(matches, &tags[i])
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return nil, errors.New("pinned to a commit hash with no associated tag")
+	case 1:
+		return matches[0], nil
+	}
+
+	slog.Debug("matched pinned commit hash to more than one tag", slog.String("action", actionRef), slog.String("version", sha))
+
+	var (
+		best        *api.Tag
+		bestVersion *semver.Version
+	)
+
+	for _, tag := range matches {
+		version, err := semver.NewVersion(tag.GetName())
+		if err != nil {
+			continue
 		}
 
+		if bestVersion == nil || version.GreaterThan(bestVersion) {
+			bestVersion = version
+			best = tag
+		}
+	}
+
+	if best != nil {
+		return best, nil
+	}
+
+	// No tag parsed as semver; fall back to the longest (most specific) name.
+	best = matches[0]
+	for _, tag := range matches[1:] {
+		if len(tag.GetName()) > len(best.GetName()) {
+			best = tag
+		}
+	}
+
+	return best, nil
+}
+
+// validateReference guards against malformed owner/repo/subpath segments before
+// they are interpolated into an API path.
+func validateReference(p ParsedAction) error {
+	if !isSafePathSegment(p.Owner) {
+		return fmt.Errorf("invalid owner %q in reference %s", p.Owner, p.Node.Value)
+	}
+
+	if !isSafePathSegment(p.Repo) {
+		return fmt.Errorf("invalid repo %q in reference %s", p.Repo, p.Node.Value)
+	}
+
+	if p.Subpath == "" {
 		return nil
-	})
-	if err != nil {
-		return []string{}, fmt.Errorf("error walking the path %q: %w", workflowDirectory, err)
 	}
 
-	return yamlFiles, nil
-}
-
-func parseYAMLFile(filePath string) ([]Action, error) {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
-	}
-
-	type Step struct {
-		Uses yaml.Node `yaml:"uses"`
-	}
-
-	type Job struct {
-		Steps []Step `yaml:"steps"`
-	}
-
-	type Workflow struct {
-		Jobs map[string]Job `yaml:"jobs"`
-	}
-
-	// Unmarshal the YAML content into a Workflow struct
-	var workflow Workflow
-
-	err = yaml.Unmarshal(data, &workflow)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal yaml: %w", err)
-	}
-
-	var actions []Action
-
-	for _, job := range workflow.Jobs {
-		for _, step := range job.Steps {
-			if step.Uses.Value == "" {
-				continue
-			}
-
-			actions = append(actions, Action{
-				FilePath: filePath,
-				Node:     step.Uses,
-			})
+	for _, segment := range strings.Split(p.Subpath, "/") {
+		if !isSafePathSegment(segment) {
+			return fmt.Errorf("invalid subpath segment %q in reference %s", segment, p.Node.Value)
 		}
 	}
 
-	return actions, nil
+	return nil
 }
 
+func isSafePathSegment(segment string) bool {
+	if segment == "" || segment == "." || segment == ".." {
+		return false
+	}
+
+	return pathSegmentRegex.MatchString(segment)
+}
+
+// detectVersionStyle classifies a raw version reference.
 func detectVersionStyle(input string) (VersionStyle, error) {
-	// Check if the string is a valid SHA1
-	if sha1Regex.MatchString(input) {
+	switch {
+	case sha1Regex.MatchString(input):
 		return PinnedVersion, nil
-	}
-
-	// Check if the string is a fully qualified semantic version (major.minor.patch)
-	if fullSemverRegex.MatchString(input) {
+	case fullSemverRegex.MatchString(input):
 		return SemanticVersionFullyQualified, nil
-	}
-
-	// Check if the string is a semantic version with major and minor components (major.minor)
-	if minorSemverRegex.MatchString(input) {
+	case minorSemverRegex.MatchString(input):
 		return SemanticVersionPartiallyQualified, nil
-	}
-
-	// Check if the string is a semantic version with only major component (major)
-	if majorSemverRegex.MatchString(input) {
+	case majorSemverRegex.MatchString(input):
 		return SemanticVersionMajorComponentOnly, nil
-	}
-
-	// Check if the string looks like a valid branch name (fallback)
-	// Common branch names: main, master, develop, feature/branch-name, etc.
-	if branchNameRegex.MatchString(input) && len(input) <= 100 {
+	case len(input) <= maxBranchNameLength && branchNameRegex.MatchString(input):
 		return BranchReference, nil
+	default:
+		return "", fmt.Errorf("unknown version reference: %s", input)
 	}
-
-	return "", fmt.Errorf("unknown string type: %s", input)
 }
