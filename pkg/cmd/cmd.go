@@ -159,6 +159,12 @@ func resolveActions(ctx context.Context, refs []Action, client api.GitHubAPI) ([
 	group.SetLimit(resolveConcurrency)
 
 	for i, ref := range refs {
+		if !isPinnableRef(ref.Node.Value) {
+			slog.Debug("ignoring non-pinnable action", slog.String("value", ref.Node.Value))
+
+			continue
+		}
+
 		group.Go(func() error {
 			if err := ctx.Err(); err != nil {
 				return fmt.Errorf("resolve actions: %w", err)

@@ -36,7 +36,7 @@ jobs:
 			expected: []string{"octo-org/this-repo/.github/workflows/release.yml@v1"},
 		},
 		{
-			name: "composite action runs.steps",
+			name: "composite action runs.steps include docker refs",
 			yaml: `
 runs:
   using: composite
@@ -44,10 +44,10 @@ runs:
     - uses: actions/checkout@v4
     - uses: docker://alpine:3.20
 `,
-			expected: []string{"actions/checkout@v4"},
+			expected: []string{"actions/checkout@v4", "docker://alpine:3.20"},
 		},
 		{
-			name: "local actions are ignored",
+			name: "local actions are listed",
 			yaml: `
 jobs:
   build:
@@ -55,7 +55,7 @@ jobs:
       - uses: ./.github/actions/local
       - uses: actions/checkout@v4
 `,
-			expected: []string{"actions/checkout@v4"},
+			expected: []string{"./.github/actions/local", "actions/checkout@v4"},
 		},
 		{
 			name: "mixed reusable and steps in one job set",
@@ -99,7 +99,14 @@ func TestFindWorkflowFiles(t *testing.T) {
 	writeFile(t, filepath.Join(".github", "workflows", "ci.yml"), "jobs: {}\n")
 	writeFile(t, filepath.Join(".github", "workflows", "release.yaml"), "jobs: {}\n")
 	writeFile(t, filepath.Join(".github", "workflows", "notes.txt"), "ignored\n")
+	// Composite actions: at the root, under .github/actions, and nested.
 	writeFile(t, "action.yml", "runs: {}\n")
+	writeFile(t, filepath.Join(".github", "actions", "setup", "action.yml"), "runs: {}\n")
+	writeFile(t, filepath.Join("tools", "deep", "action.yaml"), "runs: {}\n")
+	// These must be skipped.
+	writeFile(t, filepath.Join(".git", "action.yml"), "runs: {}\n")
+	writeFile(t, filepath.Join("node_modules", "pkg", "action.yml"), "runs: {}\n")
+	writeFile(t, filepath.Join("vendor", "dep", "action.yaml"), "runs: {}\n")
 
 	files, err := findWorkflowFiles()
 	require.NoError(t, err)
@@ -108,6 +115,8 @@ func TestFindWorkflowFiles(t *testing.T) {
 		filepath.Join(".github", "workflows", "ci.yml"),
 		filepath.Join(".github", "workflows", "release.yaml"),
 		"action.yml",
+		filepath.Join(".github", "actions", "setup", "action.yml"),
+		filepath.Join("tools", "deep", "action.yaml"),
 	}, files)
 }
 
@@ -118,6 +127,26 @@ func TestFindWorkflowFilesMissingDirectory(t *testing.T) {
 	files, err := findWorkflowFiles()
 	require.NoError(t, err)
 	require.Empty(t, files)
+}
+
+func TestIsPinnableRef(t *testing.T) {
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{value: "actions/checkout@v4", want: true},
+		{value: "octo/repo/.github/workflows/wf.yml@v1", want: true},
+		{value: "./.github/actions/local", want: false},
+		{value: "../shared/action", want: false},
+		{value: "docker://alpine:3.20", want: false},
+		{value: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			require.Equal(t, tt.want, isPinnableRef(tt.value))
+		})
+	}
 }
 
 func writeFile(t *testing.T, path, content string) {

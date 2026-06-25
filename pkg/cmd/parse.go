@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,13 +14,13 @@ import (
 // workflowsDir is the directory GitHub reads workflow files from.
 var workflowsDir = filepath.Join(".github", "workflows")
 
-// compositeActionFiles are the conventional locations of a composite action
-// definition, relative to the repository root.
-var compositeActionFiles = []string{
-	"action.yml",
-	"action.yaml",
-	filepath.Join(".github", "action.yml"),
-	filepath.Join(".github", "action.yaml"),
+// skippedWalkDirs are directories excluded from the recursive search for
+// composite action definitions, to avoid scanning version-control internals
+// and vendored third-party code.
+var skippedWalkDirs = map[string]bool{
+	".git":         true,
+	"node_modules": true,
+	"vendor":       true,
 }
 
 // Action is a raw `uses:` reference discovered in a YAML file, before any
@@ -32,20 +31,30 @@ type Action struct {
 }
 
 // findWorkflowFiles returns the YAML files that may contain action references:
-// every workflow under .github/workflows plus any composite action definition
-// at a conventional location. A missing directory is not an error.
+// every workflow under .github/workflows (which GitHub does not read
+// recursively) plus every composite action definition (action.yml /
+// action.yaml) found anywhere in the repository. A missing workflows directory
+// is not an error.
 func findWorkflowFiles() ([]string, error) {
+	seen := make(map[string]bool)
+
 	var files []string
+
+	add := func(path string) {
+		path = filepath.Clean(path)
+		if !seen[path] {
+			seen[path] = true
+			files = append(files, path)
+		}
+	}
 
 	entries, err := os.ReadDir(workflowsDir)
 	switch {
 	case err == nil:
 		for _, entry := range entries {
-			if entry.IsDir() || !isYAMLFile(entry.Name()) {
-				continue
+			if !entry.IsDir() && isYAMLFile(entry.Name()) {
+				add(filepath.Join(workflowsDir, entry.Name()))
 			}
-
-			files = append(files, filepath.Join(workflowsDir, entry.Name()))
 		}
 	case errors.Is(err, fs.ErrNotExist):
 		// No workflows directory: nothing to do here.
@@ -53,10 +62,28 @@ func findWorkflowFiles() ([]string, error) {
 		return nil, fmt.Errorf("read workflows directory %q: %w", workflowsDir, err)
 	}
 
-	for _, path := range compositeActionFiles {
-		if info, statErr := os.Stat(path); statErr == nil && !info.IsDir() {
-			files = append(files, path)
+	walkErr := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			// Tolerate unreadable entries rather than aborting the whole scan.
+			return nil //nolint:nilerr
 		}
+
+		if entry.IsDir() {
+			if skippedWalkDirs[entry.Name()] {
+				return filepath.SkipDir
+			}
+
+			return nil
+		}
+
+		if name := entry.Name(); name == "action.yml" || name == "action.yaml" {
+			add(path)
+		}
+
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("scan for composite actions: %w", walkErr)
 	}
 
 	return files, nil
@@ -172,22 +199,25 @@ func appendStepActions(actions []Action, filePath string, steps *yaml.Node) []Ac
 	return actions
 }
 
-// appendUses appends a single uses node unless it refers to a local or Docker
-// action, which gh-act cannot pin.
+// appendUses appends a single uses node. Every reference is captured here,
+// including local (./…) and Docker (docker://…) actions, so that commands like
+// `ls` can report them. Non-pinnable references are filtered out later, at
+// resolution time (see isPinnableRef).
 func appendUses(actions []Action, filePath string, uses *yaml.Node) []Action {
-	value := uses.Value
-
-	if value == "" {
-		return actions
-	}
-
-	if strings.HasPrefix(value, ".") || strings.HasPrefix(value, "docker://") {
-		slog.Debug("ignoring non-pinnable action", slog.String("value", value))
-
+	if uses.Value == "" {
 		return actions
 	}
 
 	return append(actions, Action{FilePath: filePath, Node: *uses})
+}
+
+// isPinnableRef reports whether a `uses:` value refers to an action gh-act can
+// resolve and pin. Local (./…) and Docker (docker://…) references cannot be
+// pinned to a tagged release.
+func isPinnableRef(value string) bool {
+	return value != "" &&
+		!strings.HasPrefix(value, ".") &&
+		!strings.HasPrefix(value, "docker://")
 }
 
 // mappingValue returns the value node associated with key in a YAML mapping
