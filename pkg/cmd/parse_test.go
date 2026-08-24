@@ -197,6 +197,8 @@ func TestCollectActionRefsWithFilter(t *testing.T) {
 
 	writeFile(t, filepath.Join(".github", "workflows", "ci.yml"), `
 jobs:
+  call:
+    uses: octo-org/repo/.github/workflows/release.yml@v1
   build:
     steps:
       - uses: actions/checkout@v4
@@ -210,14 +212,34 @@ jobs:
 		expected []string
 	}{
 		{
-			name:     "no filter returns everything",
-			filters:  nil,
-			expected: []string{"actions/checkout@v4", "actions/setup-go@v5", "golangci/golangci-lint-action@v6"},
+			name:    "no filter returns everything",
+			filters: nil,
+			expected: []string{
+				"octo-org/repo/.github/workflows/release.yml@v1",
+				"actions/checkout@v4",
+				"actions/setup-go@v5",
+				"golangci/golangci-lint-action@v6",
+			},
 		},
 		{
 			name:     "exact match",
 			filters:  []string{"actions/setup-go"},
 			expected: []string{"actions/setup-go@v5"},
+		},
+		{
+			name:     "owner/repo pattern matches subpath reference",
+			filters:  []string{"octo-org/repo"},
+			expected: []string{"octo-org/repo/.github/workflows/release.yml@v1"},
+		},
+		{
+			name:     "pattern with extra slashes targets the subpath specifically",
+			filters:  []string{"octo-org/repo/.github/workflows/*"},
+			expected: []string{"octo-org/repo/.github/workflows/release.yml@v1"},
+		},
+		{
+			name:     "pattern with extra slashes excludes non-matching subpath",
+			filters:  []string{"octo-org/repo/.github/workflows/other.yml"},
+			expected: []string{},
 		},
 		{
 			name:     "glob match",
