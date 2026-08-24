@@ -184,18 +184,42 @@ func filterActionRefs(refs []Action, patterns []string) []Action {
 
 // matchesFilter reports whether an action reference's owner/repo(/subpath)
 // (the part of value before "@") matches any of the given glob patterns.
+// A pattern shaped like "owner/repo" (no more than one slash) is matched
+// against just the owner/repo of the reference, so it also matches
+// subpath references such as reusable workflow calls
+// (owner/repo/.github/workflows/x.yml). A pattern with additional slashes is
+// matched against the full reference, allowing more specific targeting.
 // Matching is case-insensitive; malformed patterns never match.
 func matchesFilter(value string, patterns []string) bool {
 	ref, _, _ := strings.Cut(value, "@")
 	ref = strings.ToLower(ref)
+	ownerRepo := firstTwoSegments(ref)
 
 	for _, pattern := range patterns {
-		if ok, err := path.Match(strings.ToLower(pattern), ref); err == nil && ok {
+		pattern = strings.ToLower(pattern)
+
+		target := ref
+		if strings.Count(pattern, "/") <= 1 {
+			target = ownerRepo
+		}
+
+		if ok, err := path.Match(pattern, target); err == nil && ok {
 			return true
 		}
 	}
 
 	return false
+}
+
+// firstTwoSegments returns the "owner/repo" portion of a slash-separated
+// reference, discarding any further subpath segments.
+func firstTwoSegments(ref string) string {
+	parts := strings.SplitN(ref, "/", 3)
+	if len(parts) < 2 {
+		return ref
+	}
+
+	return parts[0] + "/" + parts[1]
 }
 
 // findActionRefsInFile parses a single YAML file and returns the external

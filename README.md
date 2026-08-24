@@ -96,8 +96,12 @@ gh act update --pin --dry-run
 
 `ls`, `outdated`, `update` and `pin` all support `--only`, a repeatable flag
 that restricts the actions acted on to those matching a glob pattern of
-`owner/repo`. Matching is case-insensitive and happens before any GitHub API
-calls, which also helps on large repositories with many actions:
+`owner/repo`. An `owner/repo` pattern (no extra slashes) also matches
+subpath references such as reusable workflow calls
+(`owner/repo/.github/workflows/x.yml`); add more slashes to the pattern to
+target a subpath specifically. Matching is case-insensitive and happens
+before any GitHub API calls, which also helps on large repositories with
+many actions:
 
 ```sh
 gh act update --pin --only actions/setup-go --only golangci/golangci-lint-action
