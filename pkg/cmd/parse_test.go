@@ -191,6 +191,93 @@ jobs:
 	require.Contains(t, files, "README.md")
 }
 
+func TestCollectActionRefsWithFilter(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	writeFile(t, filepath.Join(".github", "workflows", "ci.yml"), `
+jobs:
+  call:
+    uses: octo-org/repo/.github/workflows/release.yml@v1
+  build:
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+      - uses: golangci/golangci-lint-action@v6
+`)
+
+	tests := []struct {
+		name     string
+		filters  []string
+		expected []string
+	}{
+		{
+			name:    "no filter returns everything",
+			filters: nil,
+			expected: []string{
+				"octo-org/repo/.github/workflows/release.yml@v1",
+				"actions/checkout@v4",
+				"actions/setup-go@v5",
+				"golangci/golangci-lint-action@v6",
+			},
+		},
+		{
+			name:     "exact match",
+			filters:  []string{"actions/setup-go"},
+			expected: []string{"actions/setup-go@v5"},
+		},
+		{
+			name:     "owner/repo pattern matches subpath reference",
+			filters:  []string{"octo-org/repo"},
+			expected: []string{"octo-org/repo/.github/workflows/release.yml@v1"},
+		},
+		{
+			name:     "pattern with extra slashes targets the subpath specifically",
+			filters:  []string{"octo-org/repo/.github/workflows/*"},
+			expected: []string{"octo-org/repo/.github/workflows/release.yml@v1"},
+		},
+		{
+			name:     "pattern with extra slashes excludes non-matching subpath",
+			filters:  []string{"octo-org/repo/.github/workflows/other.yml"},
+			expected: []string{},
+		},
+		{
+			name:     "glob match",
+			filters:  []string{"actions/*"},
+			expected: []string{"actions/checkout@v4", "actions/setup-go@v5"},
+		},
+		{
+			name:     "multiple filters",
+			filters:  []string{"actions/setup-go", "golangci/golangci-lint-action"},
+			expected: []string{"actions/setup-go@v5", "golangci/golangci-lint-action@v6"},
+		},
+		{
+			name:     "case-insensitive",
+			filters:  []string{"ACTIONS/SETUP-GO"},
+			expected: []string{"actions/setup-go@v5"},
+		},
+		{
+			name:     "no match returns nothing",
+			filters:  []string{"octo/nonexistent"},
+			expected: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, refs, err := collectActionRefs(CollectOptions{Filters: tt.filters})
+			require.NoError(t, err)
+
+			values := make([]string, 0, len(refs))
+			for _, ref := range refs {
+				values = append(values, ref.Node.Value)
+			}
+
+			require.Equal(t, tt.expected, values)
+		})
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 

@@ -48,8 +48,16 @@ func run(ctx context.Context) error {
 		Usage: "Skip scanning fenced YAML code blocks in markdown files",
 	}
 
+	onlyFlag := &cli.StringSliceFlag{
+		Name:  "only",
+		Usage: "Only include actions matching these owner/repo glob patterns, repeatable (e.g. --only actions/* --only golangci/golangci-lint-action)",
+	}
+
 	collectOpts := func(c *cli.Command) cmd.CollectOptions {
-		return cmd.CollectOptions{IncludeMarkdown: !c.Bool("no-md")}
+		return cmd.CollectOptions{
+			IncludeMarkdown: !c.Bool("no-md"),
+			Filters:         c.StringSlice("only"),
+		}
 	}
 
 	command := &cli.Command{
@@ -72,7 +80,7 @@ func run(ctx context.Context) error {
 			{
 				Name:  "ls",
 				Usage: "List used actions",
-				Flags: []cli.Flag{noMDFlag},
+				Flags: []cli.Flag{noMDFlag, onlyFlag},
 				Action: func(_ context.Context, c *cli.Command) error {
 					return cmd.ListActions(collectOpts(c))
 				},
@@ -86,6 +94,7 @@ func run(ctx context.Context) error {
 						Usage: "Exit with a non-zero status when outdated actions are found",
 					},
 					noMDFlag,
+					onlyFlag,
 				},
 				Action: func(ctx context.Context, c *cli.Command) error {
 					found, err := cmd.ListOutdatedActions(ctx, collectOpts(c))
@@ -110,6 +119,7 @@ func run(ctx context.Context) error {
 					},
 					dryRunFlag,
 					noMDFlag,
+					onlyFlag,
 				},
 				Action: func(ctx context.Context, c *cli.Command) error {
 					return cmd.UpdateActions(ctx, c.Bool("pin"), c.Bool("dry-run"), collectOpts(c))
@@ -118,7 +128,7 @@ func run(ctx context.Context) error {
 			{
 				Name:  "pin",
 				Usage: "Pin used actions",
-				Flags: []cli.Flag{dryRunFlag, noMDFlag},
+				Flags: []cli.Flag{dryRunFlag, noMDFlag, onlyFlag},
 				Action: func(ctx context.Context, c *cli.Command) error {
 					return cmd.PinActions(ctx, c.Bool("dry-run"), collectOpts(c))
 				},
