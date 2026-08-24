@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -106,12 +107,17 @@ type CollectOptions struct {
 	// IncludeMarkdown enables scanning of fenced YAML code blocks inside
 	// markdown files (*.md, *.markdown) in addition to workflow YAML files.
 	IncludeMarkdown bool
+	// Filters restricts collected references to those whose owner/repo(/subpath)
+	// matches one of these glob patterns (e.g. "actions/setup-go", "golangci/*").
+	// Matching is case-insensitive. An empty slice matches everything.
+	Filters []string
 }
 
 // collectActionRefs discovers every workflow/composite file and returns the
 // file list (in scan order) alongside the flat list of action references found
 // across them. When opts.IncludeMarkdown is true, markdown files are also
-// scanned for fenced YAML blocks containing action references.
+// scanned for fenced YAML blocks containing action references. When
+// opts.Filters is non-empty, only matching references are returned.
 func collectActionRefs(opts CollectOptions) ([]string, []Action, error) {
 	files, err := findWorkflowFiles()
 	if err != nil {
@@ -129,31 +135,67 @@ func collectActionRefs(opts CollectOptions) ([]string, []Action, error) {
 		refs = append(refs, found...)
 	}
 
-	if !opts.IncludeMarkdown {
-		return files, refs, nil
-	}
-
-	mdFiles, err := findMarkdownFiles()
-	if err != nil {
-		return nil, nil, fmt.Errorf("find markdown files: %w", err)
-	}
-
-	// Markdown files (*.md / *.markdown) can never appear in the workflow file
-	// list returned by findWorkflowFiles, which only collects *.yml / *.yaml
-	// and action.yml / action.yaml. There is therefore no risk of overlap and
-	// no deduplication is needed here.
-	files = append(files, mdFiles...)
-
-	for _, filePath := range mdFiles {
-		found, err := findActionRefsInMarkdownFile(filePath)
+	if opts.IncludeMarkdown {
+		mdFiles, err := findMarkdownFiles()
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("find markdown files: %w", err)
 		}
 
-		refs = append(refs, found...)
+		// Markdown files (*.md / *.markdown) can never appear in the workflow
+		// file list returned by findWorkflowFiles, which only collects
+		// *.yml / *.yaml and action.yml / action.yaml. There is therefore no
+		// risk of overlap and no deduplication is needed here.
+		files = append(files, mdFiles...)
+
+		for _, filePath := range mdFiles {
+			found, err := findActionRefsInMarkdownFile(filePath)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			refs = append(refs, found...)
+		}
 	}
 
+	refs = filterActionRefs(refs, opts.Filters)
+
 	return files, refs, nil
+}
+
+// filterActionRefs returns only the refs whose owner/repo(/subpath) matches
+// one of the given glob patterns. An empty patterns slice returns refs
+// unchanged.
+func filterActionRefs(refs []Action, patterns []string) []Action {
+	if len(patterns) == 0 {
+		return refs
+	}
+
+	// Build a new slice; never mutate refs' backing array.
+	filtered := refs[:0:0]
+
+	for _, ref := range refs {
+		if matchesFilter(ref.Node.Value, patterns) {
+			filtered = append(filtered, ref)
+		}
+	}
+
+	return filtered
+}
+
+// matchesFilter reports whether an action reference's owner/repo(/subpath)
+// (the part of value before "@") matches any of the given glob patterns.
+// Matching is case-insensitive; malformed patterns never match.
+func matchesFilter(value string, patterns []string) bool {
+	ref, _, _ := strings.Cut(value, "@")
+	ref = strings.ToLower(ref)
+
+	for _, pattern := range patterns {
+		if ok, err := path.Match(strings.ToLower(pattern), ref); err == nil && ok {
+			return true
+		}
+	}
+
+	return false
 }
 
 // findActionRefsInFile parses a single YAML file and returns the external

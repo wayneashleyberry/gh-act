@@ -92,6 +92,18 @@ gh act pin --dry-run
 gh act update --pin --dry-run
 ```
 
+#### Only update/pin specific actions
+
+`ls`, `outdated`, `update` and `pin` all support `--only`, a repeatable flag
+that restricts the actions acted on to those matching a glob pattern of
+`owner/repo`. Matching is case-insensitive and happens before any GitHub API
+calls, which also helps on large repositories with many actions:
+
+```sh
+gh act update --pin --only actions/setup-go --only golangci/golangci-lint-action
+gh act pin --only "actions/*"
+```
+
 #### Use in CI
 
 `outdated` exits `0` by default. Pass `--exit-code` to make it fail when any
