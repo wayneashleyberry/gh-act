@@ -11,7 +11,7 @@ permissions:
   pull-requests: read
 
 jobs:
-  fmt:
+  check:
     name: check
     runs-on: ubuntu-latest
     steps:
