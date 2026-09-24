@@ -143,6 +143,8 @@ func TestIsPinnableRef(t *testing.T) {
 		{value: "octo/repo/.github/workflows/wf.yml@v1", want: true},
 		{value: "./.github/actions/local", want: false},
 		{value: "../shared/action", want: false},
+		{value: "$/.github/actions/local", want: false},
+		{value: "$/.github/workflows/wf.yml", want: false},
 		{value: "docker://alpine:3.20", want: false},
 		{value: "", want: false},
 	}
