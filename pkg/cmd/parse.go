@@ -236,7 +236,7 @@ func findActionRefsInFile(filePath string) ([]Action, error) {
 // parseActionRefs extracts external `uses:` references from workflow and
 // composite-action YAML. It understands job steps (jobs.*.steps[].uses),
 // reusable workflow calls (jobs.*.uses) and composite action steps
-// (runs.steps[].uses). Local (./, docker://) references are skipped.
+// (runs.steps[].uses). Local (./, $/, docker://) references are skipped.
 func parseActionRefs(data []byte, filePath string) ([]Action, error) {
 	var doc yaml.Node
 
@@ -304,7 +304,7 @@ func appendStepActions(actions []Action, filePath string, steps *yaml.Node) []Ac
 }
 
 // appendUses appends a single uses node. Every reference is captured here,
-// including local (./…) and Docker (docker://…) actions, so that commands like
+// including local (./…, $/…) and Docker (docker://…) actions, so that commands like
 // `ls` can report them. Non-pinnable references are filtered out later, at
 // resolution time (see isPinnableRef).
 func appendUses(actions []Action, filePath string, uses *yaml.Node) []Action {
@@ -316,11 +316,13 @@ func appendUses(actions []Action, filePath string, uses *yaml.Node) []Action {
 }
 
 // isPinnableRef reports whether a `uses:` value refers to an action gh-act can
-// resolve and pin. Local (./…) and Docker (docker://…) references cannot be
-// pinned to a tagged release.
+// resolve and pin. Local (./…), self-repository ($/…) and Docker (docker://…)
+// references cannot be pinned to a tagged release; $/ always resolves to the
+// running commit and must not carry an @ref.
 func isPinnableRef(value string) bool {
 	return value != "" &&
 		!strings.HasPrefix(value, ".") &&
+		!strings.HasPrefix(value, "$/") &&
 		!strings.HasPrefix(value, "docker://")
 }
 
