@@ -48,6 +48,26 @@ You should keep your GitHub Actions up to date, and pinned, but this makes them 
 (`docker://…`) actions. The `pin`, `update` and `outdated` commands skip local
 and Docker references, since they cannot be pinned to a release.
 
+### Excluding an action (`# nopin`)
+
+Add `nopin` to an action's trailing comment to opt that single reference out of
+`pin`, `update` and `outdated` entirely — useful for a branch reference you
+deliberately want to keep tracking live (it will never be resolved or
+rewritten), or for a pin you want to freeze even if a newer matching tag shows
+up later. It can stand alone or ride alongside the version comment gh-act
+itself writes, in either order, and matching is case-insensitive:
+
+```yaml
+# Deliberately left on a branch ref — never pinned or reported as outdated.
+uses: some-org/some-action@main # nopin
+
+# Deliberately frozen at this exact SHA — never bumped by `update --pin`.
+uses: some-org/some-action@1234567890abcdef1234567890abcdef12345678 # v1.2.3 nopin
+```
+
+`gh act ls` still lists these references (with their comment), so `nopin`
+exclusions stay auditable — it just skips them everywhere else.
+
 ### Installation
 
 Installation is a single command if you already have the [GitHub CLI](https://cli.github.com) installed:
