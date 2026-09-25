@@ -96,6 +96,10 @@ func findMarkdownFiles() ([]string, error) {
 				return filepath.SkipDir
 			}
 
+			if path != "." && isNestedGitCheckout(path) {
+				return filepath.SkipDir
+			}
+
 			return nil
 		}
 

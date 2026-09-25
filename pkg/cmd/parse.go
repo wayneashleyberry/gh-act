@@ -61,7 +61,15 @@ func findWorkflowFiles() ([]string, error) {
 			return nil //nolint:nilerr // tolerate unreadable entries and a missing .github
 		}
 
-		if !entry.IsDir() && isYAMLFile(entry.Name()) {
+		if entry.IsDir() {
+			if path != githubDir && isNestedGitCheckout(path) {
+				return filepath.SkipDir
+			}
+
+			return nil
+		}
+
+		if isYAMLFile(entry.Name()) {
 			add(path)
 		}
 
@@ -81,6 +89,10 @@ func findWorkflowFiles() ([]string, error) {
 				return filepath.SkipDir
 			}
 
+			if path != "." && isNestedGitCheckout(path) {
+				return filepath.SkipDir
+			}
+
 			return nil
 		}
 
@@ -94,6 +106,16 @@ func findWorkflowFiles() ([]string, error) {
 	}
 
 	return files, nil
+}
+
+// isNestedGitCheckout reports whether dir has its own .git entry (a directory
+// for a normal clone/submodule, a file for a linked git worktree), marking it
+// as a separate checkout that should not be scanned as part of the current
+// repository.
+func isNestedGitCheckout(dir string) bool {
+	_, err := os.Lstat(filepath.Join(dir, ".git"))
+
+	return err == nil
 }
 
 func isYAMLFile(name string) bool {
