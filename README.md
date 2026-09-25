@@ -45,13 +45,13 @@ You should keep your GitHub Actions up to date, and pinned, but this makes them 
   `node_modules` and `vendor` are skipped during this repository-wide search.
 
 `gh act ls` lists every reference it finds, including local (`./…`) and Docker
-(`docker://…`) actions. The `pin`, `update` and `outdated` commands skip local
-and Docker references, since they cannot be pinned to a release.
+(`docker://…`) actions. The `pin`, `update`, `outdated` and `drift` commands
+skip local and Docker references, since they cannot be pinned to a release.
 
 ### Excluding an action (`# nopin`)
 
 Add `nopin` to an action's trailing comment to opt that single reference out of
-`pin`, `update` and `outdated` entirely — useful for a branch reference you
+`pin`, `update`, `outdated` and `drift` entirely — useful for a branch reference you
 deliberately want to keep tracking live (it will never be resolved or
 rewritten), or for a pin you want to freeze even if a newer matching tag shows
 up later. It can stand alone or ride alongside the version comment gh-act
@@ -114,7 +114,7 @@ gh act update --pin --dry-run
 
 #### Only update/pin specific actions
 
-`ls`, `outdated`, `update` and `pin` all support `--only`, a repeatable flag
+`ls`, `outdated`, `update`, `pin` and `drift` all support `--only`, a repeatable flag
 that restricts the actions acted on to those matching a glob pattern of
 `owner/repo`. An `owner/repo` pattern (no extra slashes) also matches
 subpath references such as reusable workflow calls
@@ -127,6 +127,29 @@ many actions:
 gh act update --pin --only actions/setup-go --only golangci/golangci-lint-action
 gh act pin --only "actions/*"
 ```
+
+#### Find inconsistent actions
+
+`gh act drift` finds actions referenced with more than one distinct version or
+pin style across the repository — for example one workflow pinning
+`actions/checkout` to a commit SHA while another uses a tag like `@v4`, or two
+workflows sitting on different tags of the same action entirely. It performs
+no network calls, comparing refs exactly as written, so a SHA and a tag that
+happen to point at the same commit are still reported as drift. `# nopin`
+references are excluded, same as `pin`, `update` and `outdated`:
+
+```sh
+gh act drift
+```
+
+```
+actions/checkout is used inconsistently:
+  .github/workflows/ci.yml:10:9: actions/checkout@v4 (semver-major)
+  .github/workflows/release.yml:5:9: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 (pinned)
+```
+
+Pass `--exit-code` to fail when drift is found, so it can be used as a CI gate
+like `outdated`.
 
 #### Use in CI
 
@@ -167,6 +190,7 @@ COMMANDS:
    outdated  Check for outdated actions
    update    Update actions (supports branch references like @main when using --pin)
    pin       Pin used actions
+   drift     Find actions used with inconsistent versions or pin styles
    help, h   Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:

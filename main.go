@@ -133,6 +133,30 @@ func run(ctx context.Context) error {
 					return cmd.PinActions(ctx, c.Bool("dry-run"), collectOpts(c))
 				},
 			},
+			{
+				Name:  "drift",
+				Usage: "Find actions used with inconsistent versions or pin styles",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:  "exit-code",
+						Usage: "Exit with a non-zero status when drift is found",
+					},
+					noMDFlag,
+					onlyFlag,
+				},
+				Action: func(_ context.Context, c *cli.Command) error {
+					found, err := cmd.ListActionDrift(collectOpts(c))
+					if err != nil {
+						return err
+					}
+
+					if c.Bool("exit-code") && found {
+						return cli.Exit("", 1)
+					}
+
+					return nil
+				},
+			},
 		},
 	}
 
