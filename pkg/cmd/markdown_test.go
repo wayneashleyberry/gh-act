@@ -233,3 +233,20 @@ func TestFindMarkdownFiles(t *testing.T) {
 		filepath.Join("docs", "component.mdx"),
 	}, files)
 }
+
+func TestFindMarkdownFilesSkipsNestedGitCheckouts(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	writeFile(t, "README.md", "# root\n")
+
+	// A linked git worktree checked out anywhere in the repo must not be
+	// scanned as part of it.
+	writeFile(t, filepath.Join(".worktrees", "other-branch", ".git"), "gitdir: /elsewhere\n")
+	writeFile(t, filepath.Join(".worktrees", "other-branch", "NOTES.md"), "ignored\n")
+
+	files, err := findMarkdownFiles()
+	require.NoError(t, err)
+
+	require.ElementsMatch(t, []string{"README.md"}, files)
+}

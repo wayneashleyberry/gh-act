@@ -125,6 +125,28 @@ func TestFindWorkflowFiles(t *testing.T) {
 	}, files)
 }
 
+func TestFindWorkflowFilesSkipsNestedGitCheckouts(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	writeFile(t, "action.yml", "runs: {}\n")
+
+	// A linked git worktree (.git is a file, not a directory) checked out
+	// anywhere in the repo must not be scanned as part of it.
+	writeFile(t, filepath.Join(".worktrees", "other-branch", ".git"), "gitdir: /elsewhere\n")
+	writeFile(t, filepath.Join(".worktrees", "other-branch", "action.yml"), "runs: {}\n")
+
+	// A nested full clone or submodule (.git is a directory) is likewise
+	// out of scope.
+	writeFile(t, filepath.Join("vendored-repo", ".git", "HEAD"), "ref: refs/heads/main\n")
+	writeFile(t, filepath.Join("vendored-repo", "action.yml"), "runs: {}\n")
+
+	files, err := findWorkflowFiles()
+	require.NoError(t, err)
+
+	require.ElementsMatch(t, []string{"action.yml"}, files)
+}
+
 func TestFindWorkflowFilesMissingDirectory(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
