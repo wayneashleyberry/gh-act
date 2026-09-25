@@ -3,7 +3,6 @@
 > ✨ A GitHub (gh) CLI extension to manage, update and pin your GitHub Actions.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/wayneashleyberry/gh-act.svg)](https://pkg.go.dev/github.com/wayneashleyberry/gh-act)
-[![Go Report Card](https://goreportcard.com/badge/github.com/wayneashleyberry/gh-act)](https://goreportcard.com/report/github.com/wayneashleyberry/gh-act)
 [![Lint](https://github.com/wayneashleyberry/gh-act/actions/workflows/lint.yaml/badge.svg)](https://github.com/wayneashleyberry/gh-act/actions/workflows/lint.yaml)
 [![Dependabot Updates](https://github.com/wayneashleyberry/gh-act/actions/workflows/dependabot/dependabot-updates/badge.svg)](https://github.com/wayneashleyberry/gh-act/actions/workflows/dependabot/dependabot-updates)
 [![Release](https://github.com/wayneashleyberry/gh-act/actions/workflows/release.yaml/badge.svg)](https://github.com/wayneashleyberry/gh-act/actions/workflows/release.yaml)
