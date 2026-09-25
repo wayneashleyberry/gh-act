@@ -216,29 +216,42 @@ func resolveActions(ctx context.Context, refs []Action, client api.GitHubAPI) ([
 	return actions, nil
 }
 
-// resolveAction parses an action reference and resolves its current, latest and
-// pin target tags against the GitHub API.
-func resolveAction(ctx context.Context, action Action, client api.GitHubAPI) (ParsedAction, error) {
-	parts := strings.Split(action.Node.Value, "@")
+// splitActionValue splits a `uses:` value of the form owner/repo(/subpath)@ref
+// into its owner, repo, subpath and raw version components.
+func splitActionValue(value string) (string, string, string, string, error) {
+	parts := strings.Split(value, "@")
 	if len(parts) != 2 {
-		return ParsedAction{}, fmt.Errorf("expected exactly one '@' in reference: %s", action.Node.Value)
+		return "", "", "", "", fmt.Errorf("expected exactly one '@' in reference: %s", value)
 	}
 
 	subParts := strings.Split(parts[0], "/")
 	if len(subParts) < 2 {
-		return ParsedAction{}, fmt.Errorf("expected owner/repo in reference: %s", action.Node.Value)
+		return "", "", "", "", fmt.Errorf("expected owner/repo in reference: %s", value)
+	}
+
+	var subpath string
+	if len(subParts) > 2 {
+		subpath = strings.Join(subParts[2:], "/")
+	}
+
+	return subParts[0], subParts[1], subpath, parts[1], nil
+}
+
+// resolveAction parses an action reference and resolves its current, latest and
+// pin target tags against the GitHub API.
+func resolveAction(ctx context.Context, action Action, client api.GitHubAPI) (ParsedAction, error) {
+	owner, repo, subpath, rawVersion, err := splitActionValue(action.Node.Value)
+	if err != nil {
+		return ParsedAction{}, err
 	}
 
 	parsed := ParsedAction{
 		FilePath:         action.FilePath,
 		Node:             action.Node,
-		RawVersionString: parts[1],
-		Owner:            subParts[0],
-		Repo:             subParts[1],
-	}
-
-	if len(subParts) > 2 {
-		parsed.Subpath = strings.Join(subParts[2:], "/")
+		RawVersionString: rawVersion,
+		Owner:            owner,
+		Repo:             repo,
+		Subpath:          subpath,
 	}
 
 	if err := validateReference(parsed); err != nil {
