@@ -160,6 +160,36 @@ jobs:
 			expectedLen:  1,
 			expectedName: "aws-actions/configure-aws-credentials/setup@v1.0.0",
 		},
+		{
+			name: "workflow with nopin directive (should be ignored)",
+			yamlContent: `
+name: Test Workflow
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: some-org/some-action@main # nopin
+      - uses: actions/checkout@v1.0.0
+`,
+			expectedLen:  1,
+			expectedName: "actions/checkout@v1.0.0",
+		},
+		{
+			name: "workflow with nopin alongside an existing version comment",
+			yamlContent: `
+name: Test Workflow
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: some-org/some-action@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef # v1.2.3 nopin
+      - uses: actions/checkout@v1.0.0
+`,
+			expectedLen:  1,
+			expectedName: "actions/checkout@v1.0.0",
+		},
 	}
 
 	for _, tt := range tests {
@@ -266,6 +296,30 @@ func TestDetectVersionStyle(t *testing.T) {
 
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestHasNopinDirective(t *testing.T) {
+	tests := []struct {
+		name     string
+		comment  string
+		expected bool
+	}{
+		{name: "empty comment", comment: "", expected: false},
+		{name: "version comment only", comment: "# v1.2.3", expected: false},
+		{name: "standalone directive", comment: "# nopin", expected: true},
+		{name: "directive after version comment", comment: "# v1.2.3 nopin", expected: true},
+		{name: "directive before version comment", comment: "# nopin v1.2.3", expected: true},
+		{name: "directive is case-insensitive", comment: "# NoPin", expected: true},
+		{name: "directive with no space after hash", comment: "#nopin", expected: true},
+		{name: "similar word is not a match", comment: "# nopinning", expected: false},
+		{name: "unrelated comment", comment: "# do not touch", expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.expected, hasNopinDirective(tt.comment))
 		})
 	}
 }

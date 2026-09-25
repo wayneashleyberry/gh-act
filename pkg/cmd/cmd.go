@@ -20,6 +20,14 @@ import (
 // API at once.
 const resolveConcurrency = 8
 
+// nopinDirective is the magic comment token that opts a single `uses:`
+// reference out of pin/update/outdated processing, mirroring linter
+// suppression comments such as `// nolint` or `# noqa`. It is recognised as a
+// standalone whitespace-separated token in the line comment, so it may stand
+// alone (`# nopin`) or ride alongside the version comment gh-act itself
+// writes, in either order (`# v1.2.3 nopin`, `# nopin v1.2.3`).
+const nopinDirective = "nopin"
+
 // maxBranchNameLength caps how long a ref may be before we stop treating it as
 // a plausible branch name.
 const maxBranchNameLength = 100
@@ -161,6 +169,12 @@ func resolveActions(ctx context.Context, refs []Action, client api.GitHubAPI) ([
 	for i, ref := range refs {
 		if !isPinnableRef(ref.Node.Value) {
 			slog.Debug("ignoring non-pinnable action", slog.String("value", ref.Node.Value))
+
+			continue
+		}
+
+		if hasNopinDirective(ref.Node.LineComment) {
+			slog.Debug("ignoring action with nopin directive", slog.String("action", ref.Node.Value))
 
 			continue
 		}
@@ -523,6 +537,21 @@ func isSafePathSegment(segment string) bool {
 	}
 
 	return pathSegmentRegex.MatchString(segment)
+}
+
+// hasNopinDirective reports whether a `uses:` line comment carries the
+// nopin directive as a standalone, case-insensitive token. An empty comment
+// never matches.
+func hasNopinDirective(comment string) bool {
+	comment = strings.TrimPrefix(comment, "#")
+
+	for _, field := range strings.Fields(comment) {
+		if strings.EqualFold(field, nopinDirective) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // detectVersionStyle classifies a raw version reference.
