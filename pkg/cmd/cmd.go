@@ -535,7 +535,7 @@ func validateReference(p ParsedAction) error {
 		return nil
 	}
 
-	for _, segment := range strings.Split(p.Subpath, "/") {
+	for segment := range strings.SplitSeq(p.Subpath, "/") {
 		if !isSafePathSegment(segment) {
 			return fmt.Errorf("invalid subpath segment %q in reference %s", segment, p.Node.Value)
 		}
@@ -558,7 +558,7 @@ func isSafePathSegment(segment string) bool {
 func hasNopinDirective(comment string) bool {
 	comment = strings.TrimPrefix(comment, "#")
 
-	for _, field := range strings.Fields(comment) {
+	for field := range strings.FieldsSeq(comment) {
 		if strings.EqualFold(field, nopinDirective) {
 			return true
 		}

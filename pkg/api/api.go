@@ -219,7 +219,7 @@ func nextPagePath(linkHeader string) string {
 		return ""
 	}
 
-	for _, link := range strings.Split(linkHeader, ",") {
+	for link := range strings.SplitSeq(linkHeader, ",") {
 		sections := strings.Split(link, ";")
 		if len(sections) < 2 {
 			continue
