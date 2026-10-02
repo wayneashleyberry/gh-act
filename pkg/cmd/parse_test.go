@@ -191,7 +191,7 @@ jobs:
 `)
 
 	// A markdown file whose fenced YAML block contains a second reference.
-	writeFile(t, "README.md", "# Example\n\n```yaml\njobs:\n  fmt:\n    uses: gdcorp-actions/setup-oxfmt/.github/workflows/oxfmt-check.yaml@v1.0.0\n```\n")
+	writeFile(t, "README.md", "# Example\n\n```yaml\njobs:\n  fmt:\n    uses: mycorp-actions/setup-oxfmt/.github/workflows/oxfmt-check.yaml@v1.0.0\n```\n")
 
 	// With markdown disabled only the YAML ref should be found.
 	_, refs, err := collectActionRefs(CollectOptions{IncludeMarkdown: false})
@@ -209,7 +209,7 @@ jobs:
 	}
 
 	require.Contains(t, values, "actions/checkout@v4")
-	require.Contains(t, values, "gdcorp-actions/setup-oxfmt/.github/workflows/oxfmt-check.yaml@v1.0.0")
+	require.Contains(t, values, "mycorp-actions/setup-oxfmt/.github/workflows/oxfmt-check.yaml@v1.0.0")
 
 	// The markdown file must appear in the returned file list.
 	require.Contains(t, files, "README.md")
@@ -315,7 +315,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
       - uses: golangci/golangci-lint-action@v6
-      - uses: gdcorp-actions/internal@v1
+      - uses: mycorp-actions/internal@v1
 `)
 
 	tests := []struct {
@@ -332,12 +332,12 @@ jobs:
 				"actions/checkout@v4",
 				"actions/setup-go@v5",
 				"golangci/golangci-lint-action@v6",
-				"gdcorp-actions/internal@v1",
+				"mycorp-actions/internal@v1",
 			},
 		},
 		{
 			name:     "glob match excludes matching refs",
-			excludes: []string{"gdcorp-*/*"},
+			excludes: []string{"mycorp-*/*"},
 			expected: []string{
 				"octo-org/repo/.github/workflows/release.yml@v1",
 				"actions/checkout@v4",
@@ -352,12 +352,12 @@ jobs:
 				"octo-org/repo/.github/workflows/release.yml@v1",
 				"actions/checkout@v4",
 				"golangci/golangci-lint-action@v6",
-				"gdcorp-actions/internal@v1",
+				"mycorp-actions/internal@v1",
 			},
 		},
 		{
 			name:     "case-insensitive",
-			excludes: []string{"GDCORP-*/*"},
+			excludes: []string{"mycorp-*/*"},
 			expected: []string{
 				"octo-org/repo/.github/workflows/release.yml@v1",
 				"actions/checkout@v4",

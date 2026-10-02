@@ -131,12 +131,12 @@ matching rules that drops actions instead of keeping them. It's useful for
 skipping internal actions that aren't pinned, for example:
 
 ```sh
-gh act update --pin --exclude "gdcorp-*/*"
+gh act update --pin --exclude "mycorp-*/*"
 ```
 
 Note the trailing `/*`: since `*` never matches across a `/`, a pattern
 needs one slash to target every repo under owners sharing a prefix (here,
-every `gdcorp-*` owner). A bare `gdcorp-*` only matches an owner on its own
+every `mycorp-*` owner). A bare `mycorp-*` only matches an owner on its own
 with no repo, which never occurs.
 
 `--only` and `--exclude` can be combined; `--only` narrows the set first, then

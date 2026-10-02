@@ -55,7 +55,7 @@ func run(ctx context.Context) error {
 
 	excludeFlag := &cli.StringSliceFlag{
 		Name:  "exclude",
-		Usage: "Exclude actions matching these owner/repo glob patterns, repeatable (e.g. --exclude gdcorp-*/*)",
+		Usage: "Exclude actions matching these owner/repo glob patterns, repeatable (e.g. --exclude mycorp-*/*)",
 	}
 
 	collectOpts := func(c *cli.Command) cmd.CollectOptions {
