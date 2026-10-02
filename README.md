@@ -126,6 +126,26 @@ gh act update --pin --only actions/setup-go --only golangci/golangci-lint-action
 gh act pin --only "actions/*"
 ```
 
+The same commands also support `--exclude`, a repeatable flag with the same
+matching rules that drops actions instead of keeping them. It's useful for
+skipping internal actions that aren't pinned, for example:
+
+```sh
+gh act update --pin --exclude "gdcorp-*/*"
+```
+
+Note the trailing `/*`: since `*` never matches across a `/`, a pattern
+needs one slash to target every repo under owners sharing a prefix (here,
+every `gdcorp-*` owner). A bare `gdcorp-*` only matches an owner on its own
+with no repo, which never occurs.
+
+`--only` and `--exclude` can be combined; `--only` narrows the set first, then
+`--exclude` removes any matches from what's left:
+
+```sh
+gh act update --pin --only "actions/*" --exclude "actions/old-*"
+```
+
 #### Find inconsistent actions
 
 `gh act drift` finds actions referenced with more than one distinct version or
