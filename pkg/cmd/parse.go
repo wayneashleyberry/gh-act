@@ -133,6 +133,10 @@ type CollectOptions struct {
 	// matches one of these glob patterns (e.g. "actions/setup-go", "golangci/*").
 	// Matching is case-insensitive. An empty slice matches everything.
 	Filters []string
+	// ExcludeFilters drops references whose owner/repo(/subpath) matches one of
+	// these glob patterns, applied after Filters. Same matching rules as
+	// Filters. An empty slice excludes nothing.
+	ExcludeFilters []string
 }
 
 // collectActionRefs discovers every workflow/composite file and returns the
@@ -179,15 +183,16 @@ func collectActionRefs(opts CollectOptions) ([]string, []Action, error) {
 		}
 	}
 
-	refs = filterActionRefs(refs, opts.Filters)
+	refs = filterActionRefs(refs, opts.Filters, true)
+	refs = filterActionRefs(refs, opts.ExcludeFilters, false)
 
 	return files, refs, nil
 }
 
-// filterActionRefs returns only the refs whose owner/repo(/subpath) matches
-// one of the given glob patterns. An empty patterns slice returns refs
-// unchanged.
-func filterActionRefs(refs []Action, patterns []string) []Action {
+// filterActionRefs keeps refs whose owner/repo(/subpath) matches one of the
+// given glob patterns when want is true, or drops them when want is false.
+// An empty patterns slice returns refs unchanged.
+func filterActionRefs(refs []Action, patterns []string, want bool) []Action {
 	if len(patterns) == 0 {
 		return refs
 	}
@@ -196,7 +201,7 @@ func filterActionRefs(refs []Action, patterns []string) []Action {
 	filtered := refs[:0:0]
 
 	for _, ref := range refs {
-		if matchesFilter(ref.Node.Value, patterns) {
+		if matchesFilter(ref.Node.Value, patterns) == want {
 			filtered = append(filtered, ref)
 		}
 	}

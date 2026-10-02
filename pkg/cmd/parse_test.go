@@ -302,6 +302,97 @@ jobs:
 	}
 }
 
+func TestCollectActionRefsWithExclude(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	writeFile(t, filepath.Join(".github", "workflows", "ci.yml"), `
+jobs:
+  call:
+    uses: octo-org/repo/.github/workflows/release.yml@v1
+  build:
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+      - uses: golangci/golangci-lint-action@v6
+      - uses: gdcorp-actions/internal@v1
+`)
+
+	tests := []struct {
+		name     string
+		filters  []string
+		excludes []string
+		expected []string
+	}{
+		{
+			name:     "no exclude returns everything",
+			excludes: nil,
+			expected: []string{
+				"octo-org/repo/.github/workflows/release.yml@v1",
+				"actions/checkout@v4",
+				"actions/setup-go@v5",
+				"golangci/golangci-lint-action@v6",
+				"gdcorp-actions/internal@v1",
+			},
+		},
+		{
+			name:     "glob match excludes matching refs",
+			excludes: []string{"gdcorp-*/*"},
+			expected: []string{
+				"octo-org/repo/.github/workflows/release.yml@v1",
+				"actions/checkout@v4",
+				"actions/setup-go@v5",
+				"golangci/golangci-lint-action@v6",
+			},
+		},
+		{
+			name:     "exact match",
+			excludes: []string{"actions/setup-go"},
+			expected: []string{
+				"octo-org/repo/.github/workflows/release.yml@v1",
+				"actions/checkout@v4",
+				"golangci/golangci-lint-action@v6",
+				"gdcorp-actions/internal@v1",
+			},
+		},
+		{
+			name:     "case-insensitive",
+			excludes: []string{"GDCORP-*/*"},
+			expected: []string{
+				"octo-org/repo/.github/workflows/release.yml@v1",
+				"actions/checkout@v4",
+				"actions/setup-go@v5",
+				"golangci/golangci-lint-action@v6",
+			},
+		},
+		{
+			name:     "exclude everything",
+			excludes: []string{"*/*"},
+			expected: []string{},
+		},
+		{
+			name:     "combined with only: only narrows first, then exclude",
+			filters:  []string{"actions/*"},
+			excludes: []string{"actions/setup-go"},
+			expected: []string{"actions/checkout@v4"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, refs, err := collectActionRefs(CollectOptions{Filters: tt.filters, ExcludeFilters: tt.excludes})
+			require.NoError(t, err)
+
+			values := make([]string, 0, len(refs))
+			for _, ref := range refs {
+				values = append(values, ref.Node.Value)
+			}
+
+			require.Equal(t, tt.expected, values)
+		})
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 
