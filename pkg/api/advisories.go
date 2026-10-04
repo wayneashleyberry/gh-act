@@ -4,18 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/cli/go-gh/v2/pkg/api"
 )
 
 // advisoryPageSize is the number of vulnerabilities requested per package in a
 // single securityVulnerabilities query.
 const advisoryPageSize = 100
-
-// advisoryBatchSize caps how many packages are queried in a single GraphQL
-// request (one aliased securityVulnerabilities field per package), to keep
-// query cost well under GitHub's node limits.
-const advisoryBatchSize = 50
 
 // actionsEcosystem is the GHSA SecurityAdvisoryEcosystem enum value for
 // GitHub Actions.
@@ -51,11 +44,13 @@ func (v Vulnerability) CVEs() []string {
 	return cves
 }
 
-// vulnerabilityNode mirrors the GraphQL SecurityVulnerability shape.
+// vulnerabilityNode mirrors the GraphQL SecurityVulnerability shape. A null
+// firstPatchedVersion is a no-op for encoding/json against a non-pointer
+// struct field, leaving it at its zero value, so no nil check is needed.
 type vulnerabilityNode struct {
-	Severity                string `json:"severity"`
-	VulnerableVersionRange  string `json:"vulnerableVersionRange"`
-	FirstPatchedVersionNode *struct {
+	Severity               string `json:"severity"`
+	VulnerableVersionRange string `json:"vulnerableVersionRange"`
+	FirstPatchedVersion    struct {
 		Identifier string `json:"identifier"`
 	} `json:"firstPatchedVersion"`
 	Advisory struct {
@@ -89,18 +84,14 @@ func (c *Client) FetchVulnerabilities(ctx context.Context, packages []string) (m
 	}
 	c.mu.Unlock()
 
-	for start := 0; start < len(toFetch); start += advisoryBatchSize {
-		end := min(start+advisoryBatchSize, len(toFetch))
-
-		batch := toFetch[start:end]
-
-		fetched, err := c.fetchVulnerabilityBatch(ctx, batch)
+	if len(toFetch) > 0 {
+		fetched, err := c.fetchVulnerabilityBatch(ctx, toFetch)
 		if err != nil {
 			return nil, err
 		}
 
 		c.mu.Lock()
-		for _, pkg := range batch {
+		for _, pkg := range toFetch {
 			c.advisoryCache[pkg] = fetched[pkg]
 		}
 		c.mu.Unlock()
@@ -143,7 +134,7 @@ func (c *Client) fetchVulnerabilityBatch(ctx context.Context, packages []string)
 				Permalink:              node.Advisory.Permalink,
 				Identifiers:            node.Advisory.Identifiers,
 				VulnerableVersionRange: node.VulnerableVersionRange,
-				FirstPatchedVersion:    firstPatchedIdentifier(node),
+				FirstPatchedVersion:    node.FirstPatchedVersion.Identifier,
 			})
 		}
 
@@ -151,14 +142,6 @@ func (c *Client) fetchVulnerabilityBatch(ctx context.Context, packages []string)
 	}
 
 	return result, nil
-}
-
-func firstPatchedIdentifier(node vulnerabilityNode) string {
-	if node.FirstPatchedVersionNode == nil {
-		return ""
-	}
-
-	return node.FirstPatchedVersionNode.Identifier
 }
 
 // buildAdvisoryQuery builds a GraphQL query that fetches advisories for every
@@ -199,11 +182,3 @@ func buildAdvisoryQuery(packages []string) (string, map[string]any) {
 
 	return query, variables
 }
-
-// graphQLClient is the subset of api.GraphQLClient used by Client, declared
-// here so Client can be constructed and tested without a real GraphQL client.
-type graphQLClient interface {
-	DoWithContext(ctx context.Context, query string, variables map[string]any, response any) error
-}
-
-var _ graphQLClient = (*api.GraphQLClient)(nil)

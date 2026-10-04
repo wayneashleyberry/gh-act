@@ -72,7 +72,7 @@ type GitHubAPI interface {
 // the network once.
 type Client struct {
 	rest    *api.RESTClient
-	graphql graphQLClient
+	graphql *api.GraphQLClient
 
 	group singleflight.Group
 
