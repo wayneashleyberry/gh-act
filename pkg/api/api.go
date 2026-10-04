@@ -63,6 +63,7 @@ func (c *Commit) GetSHA() string {
 type GitHubAPI interface {
 	FetchAllTags(ctx context.Context, owner, repo string) ([]Tag, error)
 	FetchRepository(ctx context.Context, owner, repo string) (*Repository, error)
+	FetchVulnerabilities(ctx context.Context, packages []string) (map[string][]Vulnerability, error)
 }
 
 // Client is a concurrency-safe GitHub API client. Identical requests issued
@@ -70,13 +71,15 @@ type GitHubAPI interface {
 // process, so resolving the same action across many workflow files only hits
 // the network once.
 type Client struct {
-	rest *api.RESTClient
+	rest    *api.RESTClient
+	graphql graphQLClient
 
 	group singleflight.Group
 
-	mu        sync.Mutex
-	tagCache  map[string][]Tag
-	repoCache map[string]*Repository
+	mu            sync.Mutex
+	tagCache      map[string][]Tag
+	repoCache     map[string]*Repository
+	advisoryCache map[string][]Vulnerability
 }
 
 // NewClient creates a Client backed by the user's existing gh authentication.
@@ -86,10 +89,17 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("create REST client: %w", err)
 	}
 
+	graphql, err := api.DefaultGraphQLClient()
+	if err != nil {
+		return nil, fmt.Errorf("create GraphQL client: %w", err)
+	}
+
 	return &Client{
-		rest:      rest,
-		tagCache:  make(map[string][]Tag),
-		repoCache: make(map[string]*Repository),
+		rest:          rest,
+		graphql:       graphql,
+		tagCache:      make(map[string][]Tag),
+		repoCache:     make(map[string]*Repository),
+		advisoryCache: make(map[string][]Vulnerability),
 	}, nil
 }
 
