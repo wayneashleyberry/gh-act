@@ -10,13 +10,23 @@ import (
 	"github.com/wayneashleyberry/gh-act/pkg/api"
 )
 
-// severityRank orders GHSA severities from least to most severe. Unknown
-// severities rank below "low".
+// severityRank orders GHSA severities from least to most severe.
 var severityRank = map[string]int{
 	"LOW":      1,
 	"MODERATE": 2,
 	"HIGH":     3,
 	"CRITICAL": 4,
+}
+
+// ValidateSeverity returns an error if s is not a recognised GHSA severity
+// (case-insensitive). Intended for validating the --min-severity flag before
+// any work is done.
+func ValidateSeverity(s string) error {
+	if _, ok := severityRank[strings.ToUpper(s)]; !ok {
+		return fmt.Errorf("invalid severity %q: must be one of low, moderate, high, critical", s)
+	}
+
+	return nil
 }
 
 // AuditActions reports every used action whose currently referenced version
@@ -44,7 +54,7 @@ func AuditActions(ctx context.Context, opts CollectOptions, minSeverity string) 
 
 	vulnsByPackage, err := client.FetchVulnerabilities(ctx, packages)
 	if err != nil {
-		return false, fmt.Errorf("fetch security advisories: %w", err)
+		return false, fmt.Errorf("audit actions: %w", err)
 	}
 
 	found := false
@@ -106,15 +116,23 @@ func advisoryPackages(actions []ParsedAction) []string {
 }
 
 // severityAtLeast reports whether got meets or exceeds the min severity
-// threshold. Both are matched case-insensitively; an unrecognised min value
-// never filters anything out.
+// threshold. Both are matched case-insensitively. An unrecognised minSeverity
+// never filters anything out, and an unrecognised got (e.g. a future GHSA
+// severity this tool doesn't know about yet) is never filtered out either —
+// a security report should fail open, not silently hide findings it can't
+// classify.
 func severityAtLeast(got, minSeverity string) bool {
 	minRank, ok := severityRank[strings.ToUpper(minSeverity)]
 	if !ok {
 		return true
 	}
 
-	return severityRank[strings.ToUpper(got)] >= minRank
+	gotRank, ok := severityRank[strings.ToUpper(got)]
+	if !ok {
+		return true
+	}
+
+	return gotRank >= minRank
 }
 
 // versionInRange reports whether tag's version falls within a GHSA

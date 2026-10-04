@@ -7,6 +7,35 @@ import (
 	"github.com/wayneashleyberry/gh-act/pkg/api"
 )
 
+func TestValidateSeverity(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "low", value: "low"},
+		{name: "moderate", value: "moderate"},
+		{name: "high", value: "high"},
+		{name: "critical", value: "critical"},
+		{name: "case insensitive", value: "HIGH"},
+		{name: "typo", value: "hgih", wantErr: true},
+		{name: "empty", value: "", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSeverity(tt.value)
+			if tt.wantErr {
+				require.Error(t, err)
+
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestSeverityAtLeast(t *testing.T) {
 	tests := []struct {
 		name string
@@ -19,7 +48,7 @@ func TestSeverityAtLeast(t *testing.T) {
 		{name: "below", got: "LOW", min: "high", want: false},
 		{name: "case insensitive", got: "moderate", min: "MODERATE", want: true},
 		{name: "unknown min never filters", got: "LOW", min: "nonsense", want: true},
-		{name: "unknown got ranks lowest", got: "nonsense", min: "low", want: false},
+		{name: "unknown got fails open, never filtered", got: "nonsense", min: "critical", want: true},
 	}
 
 	for _, tt := range tests {

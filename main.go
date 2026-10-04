@@ -154,9 +154,10 @@ func run(ctx context.Context) error {
 						Usage: "Exit with a non-zero status when an advisory is found",
 					},
 					&cli.StringFlag{
-						Name:  "min-severity",
-						Usage: "Minimum severity to report: low, moderate, high or critical",
-						Value: "low",
+						Name:      "min-severity",
+						Usage:     "Minimum severity to report: low, moderate, high or critical",
+						Value:     "low",
+						Validator: cmd.ValidateSeverity,
 					},
 					noMDFlag,
 					onlyFlag,
