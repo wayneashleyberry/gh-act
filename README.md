@@ -43,13 +43,14 @@ You should keep your GitHub Actions up to date, and pinned, but this makes them 
   `node_modules` and `vendor` are skipped during this repository-wide search.
 
 `gh act ls` lists every reference it finds, including local (`./…`) and Docker
-(`docker://…`) actions. The `pin`, `update`, `outdated` and `drift` commands
-skip local and Docker references, since they cannot be pinned to a release.
+(`docker://…`) actions. The `pin`, `update`, `outdated`, `audit` and `drift`
+commands skip local and Docker references, since they cannot be pinned to a
+release.
 
 ### Excluding an action (`# nopin`)
 
 Add `nopin` to an action's trailing comment to opt that single reference out of
-`pin`, `update`, `outdated` and `drift` entirely — useful for a branch reference you
+`pin`, `update`, `outdated`, `audit` and `drift` entirely — useful for a branch reference you
 deliberately want to keep tracking live (it will never be resolved or
 rewritten), or for a pin you want to freeze even if a newer matching tag shows
 up later. It can stand alone or ride alongside the version comment gh-act
@@ -112,7 +113,7 @@ gh act update --pin --dry-run
 
 #### Only update/pin specific actions
 
-`ls`, `outdated`, `update`, `pin` and `drift` all support `--only`, a repeatable flag
+`ls`, `outdated`, `update`, `pin`, `audit` and `drift` all support `--only`, a repeatable flag
 that restricts the actions acted on to those matching a glob pattern of
 `owner/repo`. An `owner/repo` pattern (no extra slashes) also matches
 subpath references such as reusable workflow calls
@@ -169,6 +170,33 @@ actions/checkout is used inconsistently:
 Pass `--exit-code` to fail when drift is found, so it can be used as a CI gate
 like `outdated`.
 
+#### Audit actions for security advisories
+
+`gh act audit` reports known security advisories affecting the actions you
+use, sourced from the [GitHub Advisory Database](https://github.com/advisories)
+(GHSA) for the GitHub Actions ecosystem — including any CVE identifiers,
+severity, a summary, and the version the advisory was fixed in:
+
+```sh
+gh act audit
+```
+
+```
+.github/workflows/ci.yml:6:15: tj-actions/changed-files@v44.5.2
+  HIGH  CVE-2025-30066: tj-actions changed-files through 45.0.7 allows remote attackers to discover secrets by reading actions logs.
+  fixed in 46.0.1 — https://github.com/advisories/GHSA-mrrh-fwg8-r2c3
+```
+
+Use `--min-severity` to only report advisories at or above a given severity
+(`low`, `moderate`, `high` or `critical`; defaults to `low`, i.e. everything):
+
+```sh
+gh act audit --min-severity high
+```
+
+Pass `--exit-code` to fail when an advisory is found, so it can be used as a
+CI gate like `outdated` and `drift`.
+
 #### Use in CI
 
 `outdated` exits `0` by default. Pass `--exit-code` to make it fail when any
@@ -208,10 +236,11 @@ COMMANDS:
    outdated  Check for outdated actions
    update    Update actions (supports branch references like @main when using --pin)
    pin       Pin used actions
+   audit     Report known security advisories affecting used actions
    drift     Find actions used with inconsistent versions or pin styles
    help, h   Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
-   --debug        Print debug logs
-   --help, -h     show help
+   --debug     Print debug logs
+   --help, -h  show help
 ```

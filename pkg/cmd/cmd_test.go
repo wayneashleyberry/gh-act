@@ -13,23 +13,49 @@ import (
 
 // MockGitHubAPI implements the GitHubAPI interface for testing.
 type MockGitHubAPI struct {
-	tags       []api.Tag
-	repository *api.Repository // single repository for testing
-	err        error
+	tags            []api.Tag
+	repository      *api.Repository                // single repository for testing
+	vulnerabilities map[string][]api.Vulnerability // keyed by "owner/repo"
+	err             error
 }
 
 // NewMockGitHubAPI creates a new mock API client.
 func NewMockGitHubAPI(tags []api.Tag, err error) *MockGitHubAPI {
 	return &MockGitHubAPI{
-		tags:       tags,
-		repository: nil,
-		err:        err,
+		tags:            tags,
+		repository:      nil,
+		vulnerabilities: make(map[string][]api.Vulnerability),
+		err:             err,
 	}
 }
 
 // SetRepository sets the mock repository for testing.
 func (m *MockGitHubAPI) SetRepository(repo *api.Repository) {
 	m.repository = repo
+}
+
+// SetVulnerabilities sets the mock security advisories for a specific
+// owner/repo package.
+func (m *MockGitHubAPI) SetVulnerabilities(owner, repo string, vulns []api.Vulnerability) {
+	m.vulnerabilities[owner+"/"+repo] = vulns
+}
+
+// FetchVulnerabilities returns the mock advisories for each requested
+// package, omitting packages with none.
+func (m *MockGitHubAPI) FetchVulnerabilities(_ context.Context, packages []string) (map[string][]api.Vulnerability, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+
+	result := make(map[string][]api.Vulnerability)
+
+	for _, pkg := range packages {
+		if vulns, ok := m.vulnerabilities[pkg]; ok && len(vulns) > 0 {
+			result[pkg] = vulns
+		}
+	}
+
+	return result, nil
 }
 
 func (m *MockGitHubAPI) FetchAllTags(_ context.Context, _, _ string) ([]api.Tag, error) {

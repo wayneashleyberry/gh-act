@@ -10,16 +10,18 @@ import (
 
 // MockGitHubAPI implements the GitHubAPI interface for testing.
 type MockGitHubAPI struct {
-	tags         map[string][]Tag       // keyed by "owner/repo"
-	repositories map[string]*Repository // keyed by "owner/repo"
-	err          error
+	tags            map[string][]Tag           // keyed by "owner/repo"
+	repositories    map[string]*Repository     // keyed by "owner/repo"
+	vulnerabilities map[string][]Vulnerability // keyed by "owner/repo"
+	err             error
 }
 
 // NewMockGitHubAPI creates a new mock API client.
 func NewMockGitHubAPI() *MockGitHubAPI {
 	return &MockGitHubAPI{
-		tags:         make(map[string][]Tag),
-		repositories: make(map[string]*Repository),
+		tags:            make(map[string][]Tag),
+		repositories:    make(map[string]*Repository),
+		vulnerabilities: make(map[string][]Vulnerability),
 	}
 }
 
@@ -33,6 +35,13 @@ func (m *MockGitHubAPI) SetTags(owner, repo string, tags []Tag) {
 func (m *MockGitHubAPI) SetRepository(owner, repo string, repository *Repository) {
 	key := owner + "/" + repo
 	m.repositories[key] = repository
+}
+
+// SetVulnerabilities sets the mock security advisories for a specific
+// owner/repo package.
+func (m *MockGitHubAPI) SetVulnerabilities(owner, repo string, vulns []Vulnerability) {
+	key := owner + "/" + repo
+	m.vulnerabilities[key] = vulns
 }
 
 // SetError sets an error to be returned by FetchAllTags and FetchRepository.
@@ -70,6 +79,24 @@ func (m *MockGitHubAPI) FetchRepository(_ context.Context, owner, repo string) (
 		DefaultBranch: "main",
 		Private:       false,
 	}, nil
+}
+
+// FetchVulnerabilities returns the mock advisories for each requested package,
+// omitting packages with none.
+func (m *MockGitHubAPI) FetchVulnerabilities(_ context.Context, packages []string) (map[string][]Vulnerability, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+
+	result := make(map[string][]Vulnerability)
+
+	for _, pkg := range packages {
+		if vulns, ok := m.vulnerabilities[pkg]; ok && len(vulns) > 0 {
+			result[pkg] = vulns
+		}
+	}
+
+	return result, nil
 }
 
 func TestMockGitHubAPI(t *testing.T) {

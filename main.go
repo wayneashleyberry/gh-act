@@ -35,6 +35,10 @@ func main2() error {
 	return run(ctx)
 }
 
+// exitCodeFlagName is the flag name shared by outdated, audit and drift to
+// turn a non-error "found something" result into a non-zero exit code.
+const exitCodeFlagName = "exit-code"
+
 func run(ctx context.Context) error {
 	setDefaultLogger(slog.LevelInfo)
 
@@ -96,7 +100,7 @@ func run(ctx context.Context) error {
 				Usage: "Check for outdated actions",
 				Flags: []cli.Flag{
 					&cli.BoolFlag{
-						Name:  "exit-code",
+						Name:  exitCodeFlagName,
 						Usage: "Exit with a non-zero status when outdated actions are found",
 					},
 					noMDFlag,
@@ -109,7 +113,7 @@ func run(ctx context.Context) error {
 						return err
 					}
 
-					if c.Bool("exit-code") && found {
+					if c.Bool(exitCodeFlagName) && found {
 						return cli.Exit("", 1)
 					}
 
@@ -142,11 +146,42 @@ func run(ctx context.Context) error {
 				},
 			},
 			{
+				Name:  "audit",
+				Usage: "Report known security advisories affecting used actions",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:  exitCodeFlagName,
+						Usage: "Exit with a non-zero status when an advisory is found",
+					},
+					&cli.StringFlag{
+						Name:      "min-severity",
+						Usage:     "Minimum severity to report: low, moderate, high or critical",
+						Value:     "low",
+						Validator: cmd.ValidateSeverity,
+					},
+					noMDFlag,
+					onlyFlag,
+					excludeFlag,
+				},
+				Action: func(ctx context.Context, c *cli.Command) error {
+					found, err := cmd.AuditActions(ctx, collectOpts(c), c.String("min-severity"))
+					if err != nil {
+						return err
+					}
+
+					if c.Bool(exitCodeFlagName) && found {
+						return cli.Exit("", 1)
+					}
+
+					return nil
+				},
+			},
+			{
 				Name:  "drift",
 				Usage: "Find actions used with inconsistent versions or pin styles",
 				Flags: []cli.Flag{
 					&cli.BoolFlag{
-						Name:  "exit-code",
+						Name:  exitCodeFlagName,
 						Usage: "Exit with a non-zero status when drift is found",
 					},
 					noMDFlag,
@@ -159,7 +194,7 @@ func run(ctx context.Context) error {
 						return err
 					}
 
-					if c.Bool("exit-code") && found {
+					if c.Bool(exitCodeFlagName) && found {
 						return cli.Exit("", 1)
 					}
 
